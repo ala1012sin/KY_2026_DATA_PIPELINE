@@ -1,27 +1,6 @@
 version: '3.8'
 
 services:
-  # === 1번 선수: DB (빌드 방식 + 치트키 적용) ===
-  db:
-    # 1. 사용자가 원했던 '빌드' 방식 사용
-    build: ./postgres
-    container_name: my-custom-db
-    restart: always
-    environment:
-      POSTGRES_USER: myuser
-      POSTGRES_PASSWORD: mypassword
-      POSTGRES_DB: myapp_db
-      TZ: Asia/Seoul
-      # ▼▼▼ [치트키] 무한 재시작 해결의 열쇠 ▼▼▼
-      # 데이터를 볼륨 최상위가 아니라 'pgdata'라는 하위 폴더에 저장하게 강제함.
-      # 윈도우 파일 시스템 충돌을 피하는 가장 확실한 방법입니다.
-      # PGDATA: /var/lib/postgresql/data/pgdata
-    ports:
-      - "5435:5432"
-    volumes:
-      - ky_db_data_v3:/var/lib/postgresql
-
-  # === 2번 선수: App (FastAPI) ===
   app:
     build: ./fastapi
     env_file:
@@ -33,9 +12,6 @@ services:
       - ./fastapi:/app
     environment:
       TZ: Asia/Seoul
-      DB_URL: postgresql+psycopg2://myuser:mypassword@db:5432/myapp_db
-    depends_on:
-      - db
 
 volumes:
   ky_db_data_v3:

@@ -6,7 +6,8 @@ WORKDIR /app
 
 # 3. 리눅스 시스템 시간 설정을 위한 패키지 설치 (이게 없으면 시간이 9시간 차이남)
 # apt-get은 리눅스 설치 명령어입니다.
-RUN apt-get update && apt-get install -y tzdata
+RUN apt-get update && apt-get install -y tzdata postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
 # 환경변수 TZ를 한국 시간으로 고정합니다.
 ENV TZ=Asia/Seoul
 
