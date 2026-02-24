@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Optional, Union
 
 import requests
 
@@ -23,7 +24,7 @@ class EWScheduler:
         self.db = db_session
         self.logger = logger
 
-    def _parse_datetime(self, dt_str: any) -> datetime | None:
+    def _parse_datetime(self, dt_str: any) -> Optional[datetime]:
         """API 응답 시간 문자열을 datetime으로 변환"""
         if not dt_str:
             return None
@@ -31,7 +32,7 @@ class EWScheduler:
             return datetime.strptime(dt_str, "%Y%m%d%H%M%S")
         return dt_str
 
-    def _find_device_by_identity(self, serial_no: str, device_type: int, device_num: int | str):
+    def _find_device_by_identity(self, serial_no: str, device_type: int, device_num: Union[int, str]):
         """serial_no + device_type + device_num 조합으로 디바이스 조회"""
         return (
             self.db.query(TB_DEVICE)
@@ -43,7 +44,7 @@ class EWScheduler:
             .first()
         )
 
-    def _normalize_code(self, code: any) -> str | None:
+    def _normalize_code(self, code: any) -> Optional[str]:
         """에러/경보 코드 정규화 (유효하지 않으면 None)"""
         if code is None:
             return None
@@ -54,7 +55,7 @@ class EWScheduler:
 
     def _find_existing_log(
         self, device_id, ew_dt: datetime, code: str, error_warn: int
-    ) -> TB_WARN_ERROR_LOG | None:
+    ) -> Optional[TB_WARN_ERROR_LOG]:
         return (
             self.db.query(TB_WARN_ERROR_LOG)
             .filter(
@@ -72,7 +73,7 @@ class EWScheduler:
         ew_dt: datetime,
         code: str,
         error_warn: int,
-        ew_note: str | None = None,
+        ew_note: Optional[str] = None,
     ) -> bool:
         existing = self._find_existing_log(device_id, ew_dt, code, error_warn)
         if existing:

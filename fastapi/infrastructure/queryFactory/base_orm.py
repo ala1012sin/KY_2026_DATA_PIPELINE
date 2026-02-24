@@ -5,7 +5,7 @@ ORM 기반 DB QueryFactory 모듈
 """
 from error.errors import DataBaseError
 from sqlalchemy.orm import Session
-from typing import Type, TypeVar, Generic, Optional, List,Tuple, Any
+from typing import Type, TypeVar, Generic, Optional, List,Tuple, Any, Union
 from sqlalchemy import and_
 from Logger import Logger as logger
 # TypeVar를 사용하여 모델 타입을 제네릭으로 지정
@@ -61,7 +61,7 @@ class BaseQueryFactory(Generic[T]):
             logger.error(f"DB Error {e}")
             raise DataBaseError(message="데이터베이스 에러 발생")
         
-    def _find_device_by_identity(self, serial_no: str, device_type: int, device_num: int | str):
+    def _find_device_by_identity(self, serial_no: str, device_type: int, device_num: Union[int, str]):
         """serial_no + device_type + device_num 조합으로 디바이스 조회"""
         return (
             self.conn.query(self.model)

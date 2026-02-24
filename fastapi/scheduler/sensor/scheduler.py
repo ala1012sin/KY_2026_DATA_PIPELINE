@@ -1,6 +1,7 @@
 import os
 import time
 from datetime import datetime
+from typing import Dict, Optional, Union
 
 import requests
 from Logger import Logger as logger
@@ -41,7 +42,7 @@ class SensorScheduler:
         self.http = requests.Session()  
 
     def _get_or_create_device_by_identity(
-        self, serial_no: str, device_type: int, device_num: int | str, extra_data: dict | None = None
+        self, serial_no: str, device_type: int, device_num: Union[int, str], extra_data: Optional[Dict] = None
     ):
         """serial_no + device_type + device_num 기준으로 디바이스 조회/생성"""
         # 디바이스 고유 식별자(시리얼/타입/번호)로 기존 레코드 조회

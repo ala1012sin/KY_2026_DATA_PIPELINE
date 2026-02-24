@@ -1,11 +1,24 @@
-fastapi
-uvicorn
-apscheduler
-python-dotenv
-# PostgreSQL 데이터베이스와 연결하기 위한 핵심 드라이버입니다.
-psycopg2-binary
-sqlalchemy
-requests
-pydantic
-pandas
-psycopg
+fastapi==0.115.12
+uvicorn==0.34.0
+apscheduler==3.11.0
+python-dotenv==1.0.1
+
+# DB
+psycopg2-binary==2.9.10
+psycopg==3.2.6
+sqlalchemy==2.0.39
+
+# API / 유틸
+requests==2.32.3
+pydantic==2.10.6
+
+# 모델 추론 호환(학습 서버 기준)
+tensorflow==2.10.1
+numpy==1.23.5
+protobuf>=3.19.6,<4
+pandas==2.2.3
+scipy==1.10.1
+scikit-learn==1.4.2
+xgboost==2.0.3
+joblib==1.5.3
+h5py==3.13.0
