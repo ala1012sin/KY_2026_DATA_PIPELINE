@@ -1,0 +1,693 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>시뮬레이션 페이지</title>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; background: #f7f7f7; }
+    .card { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+    h1 { margin-top: 0; }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+    .field { display: flex; flex-direction: column; min-width: 220px; }
+    label { font-size: 13px; color: #333; margin-bottom: 4px; }
+    input { padding: 8px; border: 1px solid #bbb; border-radius: 6px; }
+    select { padding: 8px; border: 1px solid #bbb; border-radius: 6px; }
+    button { padding: 10px 14px; border: 0; border-radius: 6px; background: #2563eb; color: #fff; cursor: pointer; }
+    button:disabled { background: #94a3b8; cursor: not-allowed; }
+    .muted { color: #666; font-size: 13px; }
+    pre { background: #111827; color: #e5e7eb; padding: 12px; border-radius: 6px; overflow: auto; }
+    .layout { display: flex; gap: 16px; align-items: flex-start; }
+    .input-pane { flex: 0.78; min-width: 360px; }
+    .result-pane { flex: 0.92; min-width: 360px; }
+    .chart-pane { flex: 1.05; min-width: 420px; }
+    .override-grid { display: grid; grid-template-columns: minmax(220px, 1fr); gap: 10px; margin-bottom: 12px; }
+    .baseline-hint { font-size: 12px; color: #6b7280; margin-top: 4px; }
+    .result-box { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; }
+    .result-row { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0; border-bottom: 1px solid #f0f0f0; }
+    .result-row:last-child { border-bottom: 0; }
+    .result-key { font-size: 13px; color: #374151; }
+    .result-val { font-size: 13px; color: #111827; font-weight: 600; text-align: right; }
+    .result-msg { font-size: 14px; color: #111827; line-height: 1.6; }
+    .impact-wrap { display: flex; flex-direction: column; gap: 8px; }
+    .impact-row { display: grid; grid-template-columns: 140px 1fr 168px; align-items: center; gap: 8px; }
+    .impact-label { font-size: 12px; color: #374151; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .impact-track { background: #e5e7eb; border-radius: 999px; height: 10px; position: relative; overflow: hidden; }
+    .impact-bar { background: #2563eb; height: 100%; border-radius: 999px; }
+    .impact-val { font-size: 12px; color: #111827; text-align: right; font-weight: 600; white-space: nowrap; }
+    .compare-canvas-wrap { border: 1px solid #e5e7eb; border-radius: 8px; background: #fff; padding: 8px; }
+    #compareChart { width: 100%; height: 420px; display: block; }
+    .delta-up { color: #b91c1c; font-weight: 700; }
+    .delta-down { color: #1d4ed8; font-weight: 700; }
+    .delta-flat { color: #6b7280; font-weight: 700; }
+    .error-text { color: #b91c1c; font-size: 13px; }
+    .modal-backdrop { position: fixed; inset: 0; background: rgba(17, 24, 39, 0.45); display: none; align-items: center; justify-content: center; z-index: 9999; }
+    .modal-backdrop.open { display: flex; }
+    .modal { width: min(420px, calc(100vw - 40px)); background: #fff; border-radius: 10px; border: 1px solid #d1d5db; padding: 16px; }
+    .modal-title { font-size: 16px; font-weight: 700; color: #111827; margin-bottom: 8px; }
+    .modal-msg { font-size: 14px; color: #374151; line-height: 1.5; margin-bottom: 14px; }
+    .modal-actions { display: flex; justify-content: flex-end; }
+  </style>
+</head>
+<body>
+  <h1>설비 영향도 시뮬레이션 (MVP)</h1>
+
+  <div class="card">
+    <div class="row">
+      <div class="field">
+        <label>장비 ID</label>
+        <select id="deviceId">
+          <option value="">장비 선택</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>조회 시간(시간)</label>
+        <input id="lookback" type="number" value="24" min="1" />
+      </div>
+      <div class="field" style="justify-content:flex-end;">
+        <label>&nbsp;</label>
+        <button id="btnTemplate">기준값 불러오기</button>
+      </div>
+      <div class="field" style="min-width: 180px; justify-content:flex-end;">
+        <label>&nbsp;</label>
+        <label style="display:flex; align-items:center; gap:8px; margin:0; font-size:13px; color:#374151; height:38px;">
+          <input id="excludeWarned" type="checkbox" />
+          경고 장비 제외
+        </label>
+      </div>
+    </div>
+    <div class="muted" id="baseInfo">기준값을 먼저 불러오세요.</div>
+  </div>
+
+  <div class="layout">
+    <div class="input-pane">
+      <div class="card">
+        <h3>변경 가능한 입력값</h3>
+        <div class="override-grid" id="overrideFields"></div>
+        <button id="btnSimulate" disabled>시뮬레이션 실행</button>
+      </div>
+    </div>
+
+    <div class="result-pane">
+      <div class="card">
+        <h3>기준 예측 결과</h3>
+        <div class="result-box" id="baselineResult"></div>
+      </div>
+
+      <div class="card">
+        <h3>시뮬레이션 결과</h3>
+        <div class="result-box" id="simulatedResult"></div>
+      </div>
+
+      <div class="card">
+        <h3>비교 결과</h3>
+        <div class="result-box" id="deltaResult"></div>
+      </div>
+    </div>
+
+    <div class="chart-pane">
+      <div class="card">
+        <h3>입력 변경 영향도 Top N</h3>
+        <div class="result-box" id="impactResult"></div>
+      </div>
+
+      <div class="card">
+        <h3>기준 vs 시뮬레이션</h3>
+        <div class="compare-canvas-wrap">
+          <div id="compareChart"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="alertModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="alertTitle">
+    <div class="modal">
+      <div id="alertTitle" class="modal-title">안내</div>
+      <div id="alertMessage" class="modal-msg"></div>
+      <div class="modal-actions">
+        <button id="alertClose" type="button">확인</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const deviceIdEl = document.getElementById('deviceId');
+    const excludeWarnedEl = document.getElementById('excludeWarned');
+    const lookbackEl = document.getElementById('lookback');
+    const btnTemplate = document.getElementById('btnTemplate');
+    const btnSimulate = document.getElementById('btnSimulate');
+    const overrideFields = document.getElementById('overrideFields');
+    const baseInfo = document.getElementById('baseInfo');
+    const baselineResultEl = document.getElementById('baselineResult');
+    const simulatedResultEl = document.getElementById('simulatedResult');
+    const deltaResultEl = document.getElementById('deltaResult');
+    const impactResultEl = document.getElementById('impactResult');
+    const compareChartEl = document.getElementById('compareChart');
+    const alertModalEl = document.getElementById('alertModal');
+    const alertMessageEl = document.getElementById('alertMessage');
+    const alertCloseEl = document.getElementById('alertClose');
+
+    let templateData = null;
+    let shouldResetAfterAlert = false;
+    let isLoadingTemplate = false;
+    let isRunningSimulation = false;
+    let templateRequestSeq = 0;
+    let lastExcludedWarnedCount = 0;
+
+    function setTemplateLoading(flag) {
+      isLoadingTemplate = flag;
+      btnTemplate.disabled = flag;
+      deviceIdEl.disabled = flag;
+      excludeWarnedEl.disabled = flag;
+      lookbackEl.disabled = flag;
+      if (flag) {
+        btnTemplate.textContent = '불러오는 중...';
+      } else {
+        btnTemplate.textContent = '기준값 불러오기';
+      }
+    }
+
+    function setSimulationLoading(flag) {
+      isRunningSimulation = flag;
+      btnSimulate.disabled = flag || !templateData;
+      if (flag) {
+        btnSimulate.textContent = '실행 중...';
+      } else {
+        btnSimulate.textContent = '시뮬레이션 실행';
+      }
+    }
+
+    function openAlertModal(message, resetAfterClose = false) {
+      alertMessageEl.textContent = message;
+      shouldResetAfterAlert = resetAfterClose;
+      alertModalEl.classList.add('open');
+    }
+
+    function closeAlertModal() {
+      alertModalEl.classList.remove('open');
+      if (shouldResetAfterAlert) {
+        resetSimulationState();
+      }
+      shouldResetAfterAlert = false;
+    }
+
+    function isNoDataErrorMessage(message) {
+      const m = String(message || '');
+      return m.includes('선택한 기간에 해당 장비 데이터가 없습니다') || m.includes('선택한 장비/기간에 데이터가 없습니다');
+    }
+
+    alertCloseEl.addEventListener('click', closeAlertModal);
+    alertModalEl.addEventListener('click', (e) => {
+      if (e.target === alertModalEl) closeAlertModal();
+    });
+
+    async function loadDeviceOptions() {
+      const previousValue = deviceIdEl.value;
+      try {
+        const query = new URLSearchParams({ exclude_warned: excludeWarnedEl.checked ? 'true' : 'false' });
+        const res = await fetch(`/api/simulate/devices?${query.toString()}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'device list fetch failed');
+
+        const devices = Array.isArray(data.devices) ? data.devices : [];
+        lastExcludedWarnedCount = Number(data.excluded_warned_count || 0);
+        deviceIdEl.innerHTML = '';
+
+        const placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.textContent = devices.length ? '장비 선택' : '사용 가능한 장비 없음';
+        deviceIdEl.appendChild(placeholder);
+
+        devices.forEach((deviceId) => {
+          const option = document.createElement('option');
+          option.value = deviceId;
+          option.textContent = deviceId;
+          deviceIdEl.appendChild(option);
+        });
+
+        if (previousValue && devices.includes(previousValue)) {
+          deviceIdEl.value = previousValue;
+        } else if (devices.length > 0) {
+          deviceIdEl.value = devices[0];
+        }
+
+      } catch (e) {
+        lastExcludedWarnedCount = 0;
+        deviceIdEl.innerHTML = '<option value="">장비 목록 조회 실패</option>';
+        baseInfo.textContent = `장비 목록 조회 오류: ${String(e)}`;
+      }
+    }
+
+    function formatNum(v, digits = 4) {
+      if (v === null || v === undefined || Number.isNaN(Number(v))) return '-';
+      return Number(v).toLocaleString('ko-KR', { maximumFractionDigits: digits });
+    }
+
+    function formatFixedNum(v, digits = 2) {
+      if (v === null || v === undefined || Number.isNaN(Number(v))) return '-';
+      return Number(v).toLocaleString('ko-KR', {
+        minimumFractionDigits: digits,
+        maximumFractionDigits: digits,
+      });
+    }
+
+    function formatSignedNum(v, digits = 4) {
+      if (v === null || v === undefined || Number.isNaN(Number(v))) return '-';
+      const n = Number(v);
+      if (Math.abs(n) <= 1e-9) return '0';
+      const absText = Number(Math.abs(n)).toLocaleString('ko-KR', { maximumFractionDigits: digits });
+      return n > 0 ? `+${absText}` : `-${absText}`;
+    }
+
+    function toKw(v) {
+      if (v === null || v === undefined || Number.isNaN(Number(v))) return null;
+      return Number(v) / 1000;
+    }
+
+    function formatKw(v, digits = 3) {
+      const kw = toKw(v);
+      if (kw === null) return '-';
+      return Number(kw).toLocaleString('ko-KR', { maximumFractionDigits: digits });
+    }
+
+    function formatSignedKw(v, digits = 3) {
+      const kw = toKw(v);
+      if (kw === null) return '-';
+      return formatSignedNum(kw, digits);
+    }
+
+    function deltaTone(v) {
+      const n = Number(v || 0);
+      if (n > 1e-9) return { className: 'delta-up', icon: '▲', statusText: '증가했습니다' };
+      if (n < -1e-9) return { className: 'delta-down', icon: '▼', statusText: '감소했습니다' };
+      return { className: 'delta-flat', icon: '●', statusText: '변화 없습니다' };
+    }
+
+    function esc(v) {
+      return String(v)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+    }
+
+    function predictionRow(preds) {
+      const first = Array.isArray(preds) && preds.length > 0 ? preds[0] : {};
+      return {
+        y15: first?.y_15_pred,
+        y30: first?.y_30_pred,
+      };
+    }
+
+    function renderPredictSummary(targetEl, data) {
+      if (!data) {
+        targetEl.innerHTML = '<div class="muted">데이터가 없습니다.</div>';
+        return;
+      }
+
+      const p = predictionRow(data.preds);
+      targetEl.innerHTML = `
+        <div class="result-row"><div class="result-key">장비 ID</div><div class="result-val">${esc(data.device_id || '-')}</div></div>
+        <div class="result-row"><div class="result-key">모델</div><div class="result-val">${esc(data.best_model || '-')}</div></div>
+        <div class="result-row"><div class="result-key">기준 시각</div><div class="result-val">${esc(data.base_timestamp || '-')}</div></div>
+        <div class="result-row"><div class="result-key">15분 예측값(전력사용량 단위:kW)</div><div class="result-val">${formatKw(p.y15)}</div></div>
+        <div class="result-row"><div class="result-key">30분 예측값(전력사용량 단위:kW)</div><div class="result-val">${formatKw(p.y30)}</div></div>
+      `;
+    }
+
+    function renderDeltaSummary(targetEl, delta, baselineErrorRates = null, simulatedErrorRates = null) {
+      const parts = [];
+
+      if (delta) {
+        const y15Delta = Number(delta.y_15_pred || 0);
+        const y30Delta = Number(delta.y_30_pred || 0);
+        const y15Pct = Number(delta.y_15_pct || 0);
+        const y30Pct = Number(delta.y_30_pct || 0);
+        const y15Tone = deltaTone(y15Delta);
+        const y30Tone = deltaTone(y30Delta);
+        parts.push(`<div class="result-msg">15분 예측값은 기준 대비 <b class="${y15Tone.className}">${y15Tone.icon} ${formatFixedNum(Math.abs(y15Pct), 2)}%</b> ${y15Tone.statusText} (<span class="${y15Tone.className}">${formatSignedKw(y15Delta, 3)} kW</span>).</div>`);
+        parts.push(`<div class="result-msg" style="margin-top:8px;">30분 예측값은 기준 대비 <b class="${y30Tone.className}">${y30Tone.icon} ${formatFixedNum(Math.abs(y30Pct), 2)}%</b> ${y30Tone.statusText} (<span class="${y30Tone.className}">${formatSignedKw(y30Delta, 3)} kW</span>).</div>`);
+      }
+
+      const nmae15 = simulatedErrorRates?.NMAE_15_pct ?? baselineErrorRates?.NMAE_15_pct;
+      const nmae30 = simulatedErrorRates?.NMAE_30_pct ?? baselineErrorRates?.NMAE_30_pct;
+
+      //if (nmae15 !== undefined || nmae30 !== undefined) {
+      //  parts.push(`<div class="result-msg" style="margin-top:${parts.length ? '10px' : '0'};">모델 신뢰도 참고치(오차율, 15분): <b>${nmae15 === undefined ? '-' : `${formatNum(nmae15, 2)}%`}</b></div>`);
+      //  parts.push(`<div class="result-msg" style="margin-top:6px;">모델 신뢰도 참고치(오차율, 30분): <b>${nmae30 === undefined ? '-' : `${formatNum(nmae30, 2)}%`}</b></div>`);
+      //} else {
+      //  parts.push(`<div class="result-msg" style="margin-top:${parts.length ? '10px' : '0'};">모델 신뢰도 참고치(NMAE) 데이터가 없습니다.</div>`);
+      //}
+
+      if (parts.length === 0) {
+        targetEl.innerHTML = '<div class="muted">비교 결과가 없습니다.</div>';
+        return;
+      }
+
+      targetEl.innerHTML = parts.join('');
+    }
+
+    function clearCompareChart(message = '시뮬레이션 실행 후 비교 막대가 표시됩니다.') {
+      if (window.Plotly) {
+        Plotly.purge(compareChartEl);
+      }
+      compareChartEl.innerHTML = `<div class="muted" style="padding:14px 10px;">${esc(message)}</div>`;
+    }
+
+    function renderCompareChart(baselineData, simulatedData) {
+      const bp = predictionRow((baselineData || {}).preds || []);
+      const hasSimData = !!(simulatedData && Array.isArray(simulatedData.preds) && simulatedData.preds.length > 0);
+      const sp = hasSimData ? predictionRow(simulatedData.preds) : bp;
+
+      if (!window.Plotly) {
+        compareChartEl.innerHTML = '<div class="muted" style="padding:14px 10px;">차트 라이브러리를 불러오지 못했습니다.</div>';
+        return;
+      }
+
+      const categories = ['15분', '30분'];
+      const baselineValues = [Number(bp.y15 || 0), Number(bp.y30 || 0)];
+      const simValues = [Number(sp.y15 || 0), Number(sp.y30 || 0)];
+      const textTemplate = (values) => values.map((v) => `${formatKw(v, 2)} kW`);
+
+      Plotly.purge(compareChartEl);
+      compareChartEl.innerHTML = '';
+
+      const traces = [
+        {
+          type: 'bar',
+          name: '기준(kW)',
+          x: categories,
+          y: baselineValues,
+          text: textTemplate(baselineValues),
+          textposition: 'outside',
+          marker: { color: '#6b7280' },
+          cliponaxis: false,
+        },
+        {
+          type: 'bar',
+          name: '시뮬(kW)',
+          x: categories,
+          y: simValues,
+          text: textTemplate(simValues),
+          textposition: 'outside',
+          marker: { color: '#2563eb' },
+          cliponaxis: false,
+        },
+      ];
+
+      const maxY = Math.max(...baselineValues, ...simValues, 1);
+      const layout = {
+        barmode: 'group',
+        bargap: 0.42,
+        bargroupgap: 0.2,
+        margin: { l: 50, r: 16, t: 34, b: 48 },
+        height: 420,
+        paper_bgcolor: '#ffffff',
+        plot_bgcolor: '#ffffff',
+        legend: { orientation: 'h', x: 0, y: 1.14 },
+        xaxis: {
+          tickfont: { size: 12, color: '#334155' },
+          showgrid: false,
+          zeroline: false,
+        },
+        yaxis: {
+          range: [0, maxY * 1.14],
+          tickfont: { size: 12, color: '#334155' },
+          gridcolor: '#e5e7eb',
+          zeroline: false,
+          title: { text: 'kW', font: { size: 12, color: '#334155' } },
+        },
+        font: { family: 'Arial, sans-serif', color: '#111827' },
+      };
+
+      Plotly.react(compareChartEl, traces, layout, {
+        responsive: true,
+        displayModeBar: false,
+      });
+    }
+
+    function renderImpactChart(items, message = '') {
+      if (!Array.isArray(items) || items.length === 0) {
+        impactResultEl.innerHTML = `<div class="muted">${esc(message || '영향도 데이터가 없습니다.')}</div>`;
+        return;
+      }
+
+      const maxScore = Math.max(...items.map((x) => Number(x.score || 0)), 1e-9);
+      impactResultEl.innerHTML = `
+        <div class="impact-wrap">
+          ${items.map((x) => {
+            const widthPct = Math.max(2, (Number(x.score || 0) / maxScore) * 100);
+            return `
+              <div class="impact-row">
+                <div class="impact-label" title="${esc(x.field)}">${esc(x.field)}</div>
+                <div class="impact-track"><div class="impact-bar" style="width:${widthPct}%;"></div></div>
+                <div class="impact-val">${formatNum(x.score, 2)}%</div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      `;
+    }
+
+    async function computeAndRenderImpact(deviceId, lookback, overrides) {
+      const entries = Object.entries(overrides || {});
+      if (entries.length === 0) {
+        renderImpactChart([], '변경된 입력값이 없어 영향도 계산을 건너뜁니다.');
+        return;
+      }
+
+      impactResultEl.innerHTML = '<div class="muted">영향도 계산 중...</div>';
+      const out = [];
+
+      for (const [field, value] of entries) {
+        try {
+          const body = {
+            device_id: deviceId,
+            lookback_hours: lookback,
+            base_timestamp: templateData?.base_timestamp || '',
+            base_log_id: templateData?.base_log_id ?? null,
+            overrides: { [field]: Number(value) },
+          };
+
+          const res = await fetch('/api/simulate/predict', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+          const data = await res.json();
+          if (!res.ok) continue;
+
+          const delta = data.delta || {};
+          const y15Pct = Number(delta.y_15_pct || 0);
+          const y30Pct = Number(delta.y_30_pct || 0);
+          const score = Math.max(
+            Math.abs(y15Pct),
+            Math.abs(y30Pct),
+          );
+          out.push({
+            field,
+            score,
+          });
+        } catch (_) {
+        }
+      }
+
+      out.sort((a, b) => b.score - a.score);
+      renderImpactChart(out.slice(0, 8), '영향도 계산에 사용할 결과가 없습니다.');
+    }
+
+    function clearResults() {
+      baselineResultEl.innerHTML = '<div class="muted">기준값을 불러오면 결과가 표시됩니다.</div>';
+      simulatedResultEl.innerHTML = '<div class="muted">시뮬레이션 실행 후 결과가 표시됩니다.</div>';
+      deltaResultEl.innerHTML = '<div class="muted">비교 결과가 표시됩니다.</div>';
+      renderImpactChart([], '시뮬레이션 실행 후 영향도 막대가 표시됩니다.');
+      clearCompareChart();
+    }
+
+    function resetSimulationState() {
+      templateData = null;
+      baseInfo.textContent = '기준값을 먼저 불러오세요.';
+      overrideFields.innerHTML = '';
+      setSimulationLoading(false);
+      btnSimulate.disabled = true;
+      clearResults();
+    }
+
+    async function fetchTemplateData(showNotice = true) {
+      const deviceId = deviceIdEl.value;
+      const lookback = Number(lookbackEl.value || '24');
+      if (!deviceId || isLoadingTemplate) return;
+
+      const requestSeq = ++templateRequestSeq;
+      setTemplateLoading(true);
+      try {
+        const res = await fetch(`/api/simulate/template/${encodeURIComponent(deviceId)}?lookback_hours=${lookback}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'template fetch failed');
+
+        // 늦게 도착한 이전 요청 응답은 무시
+        if (requestSeq !== templateRequestSeq) return;
+
+        templateData = data;
+        const editableValues = data.editable_fields || {};
+        renderOverrides(editableValues);
+        const editableCount = Object.keys(editableValues).length;
+        baseInfo.textContent = `기준 시각=${data.base_timestamp}, 모델=${data.baseline?.best_model || '-'}, 변경 가능 항목=${editableCount}`;
+        renderPredictSummary(baselineResultEl, data.baseline || {});
+        simulatedResultEl.innerHTML = '<div class="muted">시뮬레이션 실행 후 결과가 표시됩니다.</div>';
+        renderDeltaSummary(deltaResultEl, null, data.error_rates || null, null);
+        renderCompareChart(data.baseline || {}, null);
+        renderImpactChart([], '시뮬레이션 실행 후 영향도 막대가 표시됩니다.');
+        btnSimulate.disabled = editableCount === 0;
+
+        if (showNotice && data.simulation_notice) {
+          openAlertModal(data.simulation_notice, false);
+        }
+      } catch (e) {
+        if (requestSeq !== templateRequestSeq) return;
+        if (isNoDataErrorMessage(e?.message)) {
+          openAlertModal('선택한 장비/기간에 데이터가 없습니다', true);
+        } else {
+          openAlertModal(`기준값 조회 중 오류가 발생했습니다: ${String(e)}`, true);
+        }
+      } finally {
+        if (requestSeq === templateRequestSeq) {
+          setTemplateLoading(false);
+        }
+      }
+    }
+
+    function renderOverrides(values) {
+      overrideFields.innerHTML = '';
+      const keys = Object.keys(values || {});
+      if (keys.length === 0) {
+        overrideFields.innerHTML = '<div class="muted">이 장비는 모델 학습에 사용된 변경 가능 raw 컬럼이 없습니다.</div>';
+        return;
+      }
+
+      keys.forEach((key) => {
+        const val = values?.[key];
+        const wrap = document.createElement('div');
+        wrap.className = 'field';
+
+        const label = document.createElement('label');
+        label.textContent = key;
+
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.step = 'any';
+        input.value = val ?? '';
+        input.dataset.field = key;
+
+        const baselineHint = document.createElement('div');
+        baselineHint.className = 'baseline-hint';
+        baselineHint.textContent = `기준값: ${val ?? '-'}`;
+
+        wrap.appendChild(label);
+        wrap.appendChild(input);
+        wrap.appendChild(baselineHint);
+        overrideFields.appendChild(wrap);
+      });
+    }
+
+    function collectOverrides() {
+      const inputs = overrideFields.querySelectorAll('input[data-field]');
+      const out = {};
+      const baselineValues = templateData?.editable_fields || {};
+      inputs.forEach((input) => {
+        const field = input.dataset.field;
+        const value = input.value;
+        if (value === '') return;
+
+        const next = Number(value);
+        const base = baselineValues[field];
+        if (base === null || base === undefined || Number.isNaN(Number(base))) {
+          out[field] = next;
+          return;
+        }
+
+        if (Math.abs(next - Number(base)) > 1e-9) {
+          out[field] = next;
+        }
+      });
+      return out;
+    }
+
+    btnTemplate.addEventListener('click', async () => {
+      await fetchTemplateData(true);
+    });
+
+    deviceIdEl.addEventListener('change', async () => {
+      if (!deviceIdEl.value) {
+        resetSimulationState();
+        return;
+      }
+      await fetchTemplateData(true);
+    });
+
+    excludeWarnedEl.addEventListener('change', async () => {
+      resetSimulationState();
+      await loadDeviceOptions();
+
+      if (excludeWarnedEl.checked) {
+        const selectedOption = deviceIdEl.options[deviceIdEl.selectedIndex];
+        const hasLoadError = selectedOption && selectedOption.textContent === '장비 목록 조회 실패';
+        if (!hasLoadError) {
+          openAlertModal(`경고 장비 ${lastExcludedWarnedCount}개를 제외했습니다.`, false);
+        }
+      }
+
+      if (deviceIdEl.value) {
+        await fetchTemplateData(true);
+      }
+    });
+
+    btnSimulate.addEventListener('click', async () => {
+      if (isRunningSimulation || isLoadingTemplate || !templateData) return;
+
+      const deviceId = deviceIdEl.value;
+      const lookback = Number(lookbackEl.value || '24');
+      const overrides = collectOverrides();
+
+      setSimulationLoading(true);
+      try {
+        const body = {
+          device_id: deviceId,
+          lookback_hours: lookback,
+          base_timestamp: templateData?.base_timestamp || '',
+          base_log_id: templateData?.base_log_id ?? null,
+          overrides
+        };
+
+        const res = await fetch('/api/simulate/predict', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'simulate predict failed');
+
+        renderPredictSummary(baselineResultEl, data.baseline || {});
+        renderPredictSummary(simulatedResultEl, data.simulated || {});
+        renderDeltaSummary(deltaResultEl, data.delta || null, data.error_rates || null, data.error_rates || null);
+        renderCompareChart(data.baseline || {}, data.simulated || {});
+        await computeAndRenderImpact(deviceId, lookback, overrides);
+      } catch (e) {
+        if (isNoDataErrorMessage(e?.message)) {
+          openAlertModal('선택한 장비/기간에 데이터가 없습니다', true);
+        } else {
+          openAlertModal(`시뮬레이션 실행 중 오류가 발생했습니다: ${String(e)}`, true);
+        }
+      } finally {
+        setSimulationLoading(false);
+      }
+    });
+
+    clearResults();
+    clearCompareChart();
+    loadDeviceOptions();
+  </script>
+</body>
+</html>

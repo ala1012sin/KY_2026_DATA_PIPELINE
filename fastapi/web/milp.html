@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MILP 피크 분배 대시보드</title>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; background: #f7f7f7; color: #111827; }
+    .card { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+    h1 { margin-top: 0; margin-bottom: 16px; }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; align-items: end; }
+    .field { display: flex; flex-direction: column; min-width: 220px; }
+    label { font-size: 13px; color: #374151; margin-bottom: 4px; }
+    input { padding: 8px; border: 1px solid #bbb; border-radius: 6px; }
+    button { padding: 10px 14px; border: 0; border-radius: 6px; background: #2563eb; color: #fff; cursor: pointer; }
+    button:disabled { background: #94a3b8; cursor: not-allowed; }
+    .muted { color: #6b7280; font-size: 13px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+    .metric { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px; }
+    .metric .k { color: #6b7280; font-size: 12px; margin-bottom: 4px; }
+    .metric .v { font-size: 18px; font-weight: 700; }
+    .good { color: #047857; }
+    .warn { color: #b45309; }
+    .bad { color: #b91c1c; }
+    .rec-list { margin: 0; padding-left: 18px; }
+    .rec-list li { margin-bottom: 8px; line-height: 1.5; }
+    .rec-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .rec-col { border: 1px solid #e5e7eb; border-radius: 8px; background: #f9fafb; padding: 10px; }
+    .rec-col h4 { margin: 0 0 8px; font-size: 13px; color: #334155; }
+    .rec-empty { color: #6b7280; font-size: 13px; }
+    .table-wrap { overflow: auto; border: 1px solid #e5e7eb; border-radius: 8px; }
+    table { width: 100%; border-collapse: collapse; min-width: 980px; font-size: 12px; }
+    th, td { border-bottom: 1px solid #f1f5f9; padding: 8px; text-align: right; }
+    th:first-child, td:first-child { text-align: left; }
+    th { background: #f8fafc; color: #334155; }
+    .tag { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+    .tag-donor { background: #dbeafe; color: #1d4ed8; }
+    .tag-idle { background: #fef3c7; color: #92400e; }
+    .chart-box { border: 1px solid #e5e7eb; border-radius: 8px; background: #fff; padding: 10px; }
+    #peakChart { width: 100%; height: 560px; display: block; }
+    .modal-backdrop { position: fixed; inset: 0; background: rgba(17, 24, 39, 0.45); display: none; align-items: center; justify-content: center; z-index: 9999; }
+    .modal-backdrop.open { display: flex; }
+    .modal { width: min(360px, calc(100vw - 40px)); background: #fff; border-radius: 10px; border: 1px solid #d1d5db; padding: 16px; }
+    .modal-title { font-size: 16px; font-weight: 700; color: #111827; margin-bottom: 8px; }
+    .modal-msg { font-size: 14px; color: #374151; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <h1>MILP 피크 분배 대시보드 (테스트)</h1>
+
+  <div class="card">
+    <div class="row">
+      <div class="field">
+        <label>조회 시간(시간)</label>
+        <input id="lookback" type="number" value="24" min="1" />
+      </div>
+      <div class="field">
+        <label>상위 부하 장비 수(top_k)</label>
+        <input id="topk" type="number" value="2" min="1" />
+      </div>
+      <div class="field">
+        <label>미가동 기준(OP_STATUS 평균 이하)</label>
+        <input id="idleThreshold" type="number" value="0.05" min="0" max="1" step="0.01" />
+      </div>
+      <div class="field">
+        <label>강제 초과 비율(테스트)</label>
+        <input id="forceMargin" type="number" value="0.05" min="0.01" max="0.5" step="0.01" />
+      </div>
+      <div class="field" style="min-width: 200px;">
+        <label>&nbsp;</label>
+        <label style="display:flex; align-items:center; gap:8px; margin:0; font-size:13px; color:#374151; height:38px;">
+          <input id="forceExceed" type="checkbox" />
+          임계치 초과 테스트 모드
+        </label>
+      </div>
+      <div class="field" style="min-width: 160px;">
+        <label>&nbsp;</label>
+        <button id="btnRun">MILP 실행</button>
+      </div>
+    </div>
+    <div class="muted" id="statusText">실행 전입니다.</div>
+  </div>
+
+  <div class="card">
+    <h3>피크 요약</h3>
+    <div class="grid" id="summaryGrid"></div>
+  </div>
+
+  <div class="card">
+    <h3>추천 분배 문구</h3>
+    <div class="rec-grid">
+      <div class="rec-col">
+        <h4 id="recTitle1">장비 1</h4>
+        <ul class="rec-list" id="recommendList1"></ul>
+      </div>
+      <div class="rec-col">
+        <h4 id="recTitle2">장비 2</h4>
+        <ul class="rec-list" id="recommendList2"></ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>최대 가동 장비 2대 예측 그래프 (15/30분)</h3>
+    <div class="chart-box">
+      <div id="peakChart"></div>
+    </div>
+  </div>
+
+  <div id="loadingModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="loadingTitle">
+    <div class="modal">
+      <div id="loadingTitle" class="modal-title">결과 계산중</div>
+      <div class="modal-msg">MILP 최적화를 실행하고 있습니다. 잠시만 기다려주세요.</div>
+    </div>
+  </div>
+
+  <script>
+    const lookbackEl = document.getElementById('lookback');
+    const topkEl = document.getElementById('topk');
+    const idleThresholdEl = document.getElementById('idleThreshold');
+    const forceExceedEl = document.getElementById('forceExceed');
+    const forceMarginEl = document.getElementById('forceMargin');
+    const btnRun = document.getElementById('btnRun');
+    const statusTextEl = document.getElementById('statusText');
+    const summaryGridEl = document.getElementById('summaryGrid');
+    const recTitle1El = document.getElementById('recTitle1');
+    const recTitle2El = document.getElementById('recTitle2');
+    const recommendList1El = document.getElementById('recommendList1');
+    const recommendList2El = document.getElementById('recommendList2');
+    const chartEl = document.getElementById('peakChart');
+    const loadingModalEl = document.getElementById('loadingModal');
+
+    function formatNum(v, digits = 2) {
+      if (v === null || v === undefined || Number.isNaN(Number(v))) return '-';
+      return Number(v).toLocaleString('ko-KR', {
+        minimumFractionDigits: digits,
+        maximumFractionDigits: digits,
+      });
+    }
+
+    function toKw(v) {
+      return Number(v || 0) / 1000;
+    }
+
+    function formatKw(v, digits = 2) {
+      return formatNum(toKw(v), digits);
+    }
+
+    function esc(v) {
+      return String(v)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+    }
+
+    function drawPeakChart(data) {
+      if (!window.Plotly) {
+        chartEl.innerHTML = '<div class="muted" style="padding:14px 10px;">차트 라이브러리를 불러오지 못했습니다.</div>';
+        return;
+      }
+
+      const donors = (Array.isArray(data.devices) ? data.devices : [])
+        .filter((d) => d.is_donor)
+        .sort((a, b) => Math.max(b.baseline_15 || 0, b.baseline_30 || 0) - Math.max(a.baseline_15 || 0, a.baseline_30 || 0))
+        .slice(0, 2);
+
+      if (donors.length === 0) {
+        Plotly.purge(chartEl);
+        chartEl.innerHTML = '<div class="muted" style="padding:14px 10px;">그래프로 표시할 분배원 장비가 없습니다.</div>';
+        return;
+      }
+
+      const colors = ['#2563eb', '#16a34a'];
+
+      const traces = [];
+      const xLabels = ['15분', '30분'];
+      const layout = {
+        grid: { rows: 1, columns: 2, pattern: 'independent' },
+        margin: { l: 46, r: 18, t: 48, b: 48 },
+        height: 560,
+        paper_bgcolor: '#ffffff',
+        plot_bgcolor: '#ffffff',
+        font: { family: 'Arial, sans-serif', color: '#111827' },
+        showlegend: true,
+        legend: { orientation: 'h', x: 0, y: 1.14 },
+      };
+
+      donors.forEach((device, idx) => {
+        const axisSuffix = idx === 0 ? '' : String(idx + 1);
+        const lineColor = colors[idx % colors.length];
+        const p15 = toKw(device.baseline_15 || 0);
+        const p30 = toKw(device.baseline_30 || 0);
+        const th = toKw(device.threshold || 0);
+        const exceed15 = Math.max(0, p15 - th);
+        const exceed30 = Math.max(0, p30 - th);
+
+        traces.push({
+          type: 'scatter',
+          mode: 'lines+markers+text',
+          x: xLabels,
+          y: [p15, p30],
+          text: [`${formatNum(p15, 2)} kW`, `${formatNum(p30, 2)} kW`],
+          textposition: 'top center',
+          line: { color: lineColor, width: 2.5 },
+          marker: { color: lineColor, size: 8 },
+          name: idx === 0 ? '예측값' : undefined,
+          xaxis: `x${axisSuffix}`,
+          yaxis: `y${axisSuffix}`,
+          hovertemplate: `${esc(device.device_id)}<br>%{x}: %{y:.2f} kW<extra></extra>`,
+          showlegend: idx === 0,
+        });
+
+        traces.push({
+          type: 'scatter',
+          mode: 'lines',
+          x: xLabels,
+          y: [th, th],
+          line: { color: '#ef4444', width: 2, dash: 'dash' },
+          name: idx === 0 ? '임계값' : undefined,
+          xaxis: `x${axisSuffix}`,
+          yaxis: `y${axisSuffix}`,
+          hovertemplate: `${esc(device.device_id)}<br>임계값: %{y:.2f} kW<extra></extra>`,
+          showlegend: idx === 0,
+        });
+
+        if (exceed15 > 0 || exceed30 > 0) {
+          traces.push({
+            type: 'bar',
+            x: xLabels,
+            y: [exceed15, exceed30],
+            base: [th, th],
+            marker: { color: 'rgba(239,68,68,0.20)' },
+            name: idx === 0 ? '초과구간' : undefined,
+            xaxis: `x${axisSuffix}`,
+            yaxis: `y${axisSuffix}`,
+            hovertemplate: `${esc(device.device_id)}<br>%{x} 초과량: %{y:.2f} kW<extra></extra>`,
+            showlegend: idx === 0,
+          });
+        }
+
+        const yMax = Math.max(p15, p30, th, th + exceed15, th + exceed30, 1) * 1.25;
+        layout[`xaxis${axisSuffix}`] = {
+          tickfont: { size: 12, color: '#334155' },
+          showgrid: false,
+          zeroline: false,
+        };
+        layout[`yaxis${axisSuffix}`] = {
+          range: [0, yMax],
+          title: { text: 'kW', font: { size: 12, color: '#334155' } },
+          tickfont: { size: 12, color: '#334155' },
+          gridcolor: '#e5e7eb',
+          zeroline: false,
+        };
+
+        layout.annotations = (layout.annotations || []);
+        layout.annotations.push({
+          text: esc(device.device_id),
+          xref: 'paper',
+          yref: 'paper',
+          x: idx === 0 ? 0.22 : 0.78,
+          y: 1.06,
+          showarrow: false,
+          font: { size: 12, color: '#111827' },
+        });
+      });
+
+      Plotly.react(chartEl, traces, layout, {
+        responsive: true,
+        displayModeBar: false,
+      });
+    }
+
+    function renderSummary(data) {
+      const r15 = Number(data.peak_15_before || 0) - Number(data.peak_15_after || 0);
+      const r30 = Number(data.peak_30_before || 0) - Number(data.peak_30_after || 0);
+      const r15Pct = Number(data.peak_15_before || 0) === 0 ? 0 : (r15 / Number(data.peak_15_before)) * 100;
+      const r30Pct = Number(data.peak_30_before || 0) === 0 ? 0 : (r30 / Number(data.peak_30_before)) * 100;
+
+      const items = [
+        { k: '분석 장비 수', v: `${data.device_count}대` },
+        { k: '분배 기준 상위 장비', v: (data.donor_device_ids || []).length ? data.donor_device_ids.join('<br/>') : '-' },
+        { k: '15분 피크 절감', v: `${formatNum(toKw(r15), 2)} kW (${formatNum(r15Pct, 2)}%)`, cls: r15 > 0 ? 'good' : 'warn' },
+        { k: '30분 피크 절감', v: `${formatNum(toKw(r30), 2)} kW (${formatNum(r30Pct, 2)}%)`, cls: r30 > 0 ? 'good' : 'warn' },
+        { k: '미가동 장비 수', v: `${(data.idle_device_ids || []).length}대` },
+        { k: '제외 장비 수', v: `${(data.skipped_devices || []).length}대` },
+      ];
+
+      summaryGridEl.innerHTML = items.map((item) => `
+        <div class="metric">
+          <div class="k">${esc(item.k)}</div>
+          <div class="v ${item.cls || ''}">${item.v}</div>
+        </div>
+      `).join('');
+    }
+
+    function renderRecommendations(data) {
+      const devices = Array.isArray(data.devices) ? data.devices : [];
+      const donors = devices.filter((d) => d.is_donor)
+        .sort((a, b) => Math.max(b.baseline_15 || 0, b.baseline_30 || 0) - Math.max(a.baseline_15 || 0, a.baseline_30 || 0))
+        .slice(0, 2);
+
+      const columns = [
+        { titleEl: recTitle1El, listEl: recommendList1El, donor: donors[0] },
+        { titleEl: recTitle2El, listEl: recommendList2El, donor: donors[1] },
+      ];
+
+      columns.forEach(({ titleEl, listEl, donor }, idx) => {
+        if (!donor) {
+          titleEl.textContent = `장비 ${idx + 1}`;
+          listEl.innerHTML = '<li class="rec-empty">표시할 분배원 장비가 없습니다.</li>';
+          return;
+        }
+
+        titleEl.textContent = donor.device_id;
+        const recs = [];
+
+        [
+          { minute: 15, base: Number(donor.baseline_15 || 0), threshold: Number(donor.threshold || 0), out: Number(donor.shift_out_15 || 0) },
+          { minute: 30, base: Number(donor.baseline_30 || 0), threshold: Number(donor.threshold || 0), out: Number(donor.shift_out_30 || 0) },
+        ].forEach((h) => {
+          if (h.base <= h.threshold || h.out <= 0) return;
+
+          const allocations = (data.allocation_plan || [])
+            .filter((x) => Number(x.minute) === h.minute && x.from_device_id === donor.device_id)
+            .sort((a, b) => Number(b.power_w || 0) - Number(a.power_w || 0));
+
+          const mainReceiver = allocations[0];
+          const over = h.base - h.threshold;
+
+          if (mainReceiver) {
+            recs.push(
+              `${h.minute}분 후 임계치 초과 예상량은 ${formatKw(over, 2)}kW입니다. ` +
+              `${mainReceiver.to_device_id} 장비로 약 ${formatKw(mainReceiver.power_w, 2)}kW를 분배하면 피크 완화가 가능합니다.`
+            );
+          } else {
+            recs.push(
+              `${h.minute}분 후 임계치 초과 예상량은 ${formatKw(over, 2)}kW이며, 현재 최적화에서는 ` +
+              `수신 장비가 확보되지 않아 분배 효과가 제한적입니다.`
+            );
+          }
+        });
+
+        if (recs.length === 0) {
+          listEl.innerHTML = '<li class="rec-empty">현재 조건에서는 임계치 초과 예상이 없어 분배 문구가 없습니다.</li>';
+          return;
+        }
+
+        listEl.innerHTML = recs.map((x) => `<li>${esc(x)}</li>`).join('');
+      });
+    }
+
+    async function runMilp() {
+      if (btnRun.disabled) return;
+
+      const lookback_hours = Number(lookbackEl.value || 24);
+      const top_k = Number(topkEl.value || 2);
+      const idle_op_status_threshold = Number(idleThresholdEl.value || 0.05);
+      const force_exceed_demo = !!forceExceedEl.checked;
+      const force_exceed_margin_ratio = Number(forceMarginEl.value || 0.05);
+
+      btnRun.disabled = true;
+      btnRun.textContent = '실행 중...';
+      statusTextEl.textContent = 'MILP 계산을 수행 중입니다...';
+      loadingModalEl.classList.add('open');
+
+      try {
+        const res = await fetch('/api/optimize/peak-dispatch-test', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            lookback_hours,
+            top_k,
+            idle_op_status_threshold,
+            force_exceed_demo,
+            force_exceed_margin_ratio,
+          }),
+        });
+
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'MILP 요청 실패');
+
+        statusTextEl.innerHTML = `
+          상태: <b>${esc(data.status || '-')}</b>,
+          메시지: ${esc(data.message || '-')}
+        `;
+
+        renderSummary(data);
+        renderRecommendations(data);
+        drawPeakChart(data);
+      } catch (e) {
+        statusTextEl.textContent = `오류: ${String(e)}`;
+        summaryGridEl.innerHTML = '';
+        recommendList1El.innerHTML = '<li class="rec-empty">결과를 가져오지 못했습니다.</li>';
+        recommendList2El.innerHTML = '<li class="rec-empty">결과를 가져오지 못했습니다.</li>';
+        if (window.Plotly) {
+          Plotly.purge(chartEl);
+        }
+        chartEl.innerHTML = '<div class="muted" style="padding:14px 10px;">그래프를 표시할 수 없습니다.</div>';
+      } finally {
+        btnRun.disabled = false;
+        btnRun.textContent = 'MILP 실행';
+        loadingModalEl.classList.remove('open');
+      }
+    }
+
+    btnRun.addEventListener('click', runMilp);
+    runMilp();
+  </script>
+</body>
+</html>

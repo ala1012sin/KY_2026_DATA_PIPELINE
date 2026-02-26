@@ -13,4 +13,9 @@ __pycache__/
 # generated preprocessing outputs
 fastapi/out_preprocess/
 
+# model artifacts / heavy outputs
+fastapi/ai_models/
+fastapi/backup/
+*.dump
+
 *:Zone.Identifier

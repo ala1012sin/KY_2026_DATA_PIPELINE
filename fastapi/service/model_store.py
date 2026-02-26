@@ -16,12 +16,12 @@ def _resolve_model_root() -> str:
     """
     MODEL_ROOT 우선:
       1) ENV MODEL_ROOT
-      2) 기본 ./models/current  (docker-compose에서 /app 기준이면 /app/models/current가 됨)
+            2) 기본 ./ai_models/current  (docker-compose에서 /app 기준이면 /app/ai_models/current가 됨)
     """
     env = os.environ.get("MODEL_ROOT")
     if env:
         return str(Path(env).expanduser().resolve())
-    return str(Path("./models/current").resolve())
+    return str(Path("./ai_models/current").resolve())
 
 
 class BestModelRunner:

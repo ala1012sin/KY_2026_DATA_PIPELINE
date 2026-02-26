@@ -70,6 +70,7 @@ def fetch_pems_pro_log_df(
 
         records = [
             {
+                "LOG_ID": row.log_id,
                 "DEVICE_ID": str(row.device_id),
                 "LOG_DT": row.log_dt,
                 "PRESSURE": row.pressure,
