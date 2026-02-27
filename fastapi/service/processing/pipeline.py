@@ -1,9 +1,9 @@
-"""전처리 파이프라인 진입점 모듈.
+"""
+전처리 파이프라인 진입점 모듈.
 
 주요 흐름:
 1) TB_PEMS_PRO_LOG 조회
-2) (선택) 원본 CSV 저장
-3) 기존 전처리 함수로 supervised 데이터 생성
+2) DataFrame 기반 전처리로 supervised 데이터 생성
 """
 import json
 import os
@@ -93,29 +93,6 @@ def fetch_pems_pro_log_df(
             session.close()
 
 
-def export_pems_pro_log_to_csv(
-    start_dt: datetime,
-    end_dt: datetime,
-    out_csv_path: str,
-    device_ids: Optional[Sequence[str]] = None,
-    db: Optional[Session] = None,
-) -> str:
-    """TB_PEMS_PRO_LOG를 CSV로 추출한다.
-
-    - 입력: 조회 기간, 장비 ID 목록(선택), DB 세션(선택)
-    - 출력: 전처리 원본으로 사용할 CSV 경로
-    """
-    df = fetch_pems_pro_log_df(
-        start_dt=start_dt,
-        end_dt=end_dt,
-        device_ids=device_ids,
-        db=db,
-    )
-    os.makedirs(os.path.dirname(out_csv_path) or ".", exist_ok=True)
-    df.to_csv(out_csv_path, index=False, encoding="utf-8-sig")
-    return out_csv_path
-
-
 def preprocess_pems_pro_from_db_in_memory(
     start_dt: datetime,
     end_dt: datetime,
@@ -132,56 +109,6 @@ def preprocess_pems_pro_from_db_in_memory(
         db=db,
     )
     return preprocess_raw_df_to_supervised(raw=raw, pcfg=pcfg, persist_outputs=False)
-
-
-def preprocess_pems_pro_from_db(
-    start_dt: datetime,
-    end_dt: datetime,
-    pcfg: PreprocessConfig,
-    device_ids: Optional[Sequence[str]] = None,
-    db: Optional[Session] = None,
-) -> Dict[str, Any]:
-    """DB 조회부터 전처리까지 한 번에 수행하는 오케스트레이터."""
-    # 장비별 결과물이 섞이지 않도록 출력 디렉터리 보장
-    os.makedirs(pcfg.out_dir, exist_ok=True)
-    raw_csv_path = os.path.join(pcfg.out_dir, "pems_pro_raw.csv")
-    # 1) DB 원천 로그를 CSV로 내리고
-    export_pems_pro_log_to_csv(
-        start_dt=start_dt,
-        end_dt=end_dt,
-        out_csv_path=raw_csv_path,
-        device_ids=device_ids,
-        db=db,
-    )
-    # 2) 기존 CSV 전처리 파이프라인 재사용
-    return preprocess_raw_csv_to_supervised(raw_csv_path=raw_csv_path, pcfg=pcfg)
-
-
-def preprocess_raw_csv_to_supervised(raw_csv_path: str, pcfg: PreprocessConfig) -> Dict[str, Any]:
-    """원본 CSV를 supervised 전처리 데이터로 변환한다."""
-    os.makedirs(pcfg.out_dir, exist_ok=True)
-
-    # 입력 파일 기본 검증
-    if not os.path.exists(raw_csv_path):
-        raise FileNotFoundError(f"원본 CSV 파일이 없습니다: {raw_csv_path}")
-    if os.path.getsize(raw_csv_path) == 0:
-        raise DataNotFoundError(f"원본 CSV가 비어 있습니다: {raw_csv_path}")
-
-    # CSV 로딩
-    try:
-        raw = pd.read_csv(raw_csv_path)
-    except pd.errors.EmptyDataError as e:
-        raise DataNotFoundError(f"원본 CSV를 읽을 수 없습니다(컬럼 없음): {raw_csv_path}") from e
-
-    if raw.empty:
-        raise DataNotFoundError("원본 데이터프레임이 비어 있습니다")
-
-    return preprocess_raw_df_to_supervised(
-        raw=raw,
-        pcfg=pcfg,
-        raw_csv_path=raw_csv_path,
-        persist_outputs=True,
-    )
 
 
 def preprocess_raw_df_to_supervised(

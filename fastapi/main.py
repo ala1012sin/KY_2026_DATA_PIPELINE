@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 
 from scheduler.sensor.scheduler import SensorScheduler
+from scheduler.EW.scheduler import EWScheduler
 from setting.database_orm import db_connection_pool, engine
 from db.base import Base
 from db.public.models import TB_CUSTOMER, TB_DEVICE, TB_VIBRATION_LOG, TB_FLOW_LOG, TB_WARN_ERROR_LOG, TB_PEMSPROPLUS_LOG, TB_PEMS_PRO_LOG, TB_AI_PEMS_LOG
@@ -95,6 +96,24 @@ async def _run_sensor_job(minutes: int = 1) -> None:
             next(db_gen)
         except StopIteration:
             pass
+        
+# 아직 에러 데이터 수신이 되지 않아 주석 처리
+#async def _run_ew_job(minutes: int = 1) -> None:
+#    # 최근 N분 구간을 기준으로 EW 배치 실행
+#    tz = ZoneInfo("Asia/Seoul")
+#    end = datetime.now(tz=tz)
+#    start = end - timedelta(minutes=minutes)
+#
+#    db_gen = db_connection_pool()
+#    db = next(db_gen)
+#    try:
+#        EWScheduler(db).run(start, end)
+#    finally:
+#        try:
+#            next(db_gen)
+#        except StopIteration:
+#            pass
+
 
 
 @scheduler.scheduled_job("interval", seconds=60)
@@ -102,3 +121,11 @@ async def sensor_cron_job():
     # 60초마다 최근 1분 데이터 처리
     await _run_sensor_job(minutes=1)
 
+# 아직 에러 데이터 수신이 되지 않아 주석 처리
+#@scheduler.scheduled_job("interval", minutes=1) 
+#async def ew_cron_job():
+#    # 1분마다 최근 1분 EW 데이터 처리
+#    try:
+#        await _run_ew_job(minutes=1)
+#    except Exception as e:
+#        logging.exception(f"EW 스케줄러 실행 실패: {e}")

@@ -15,7 +15,7 @@ class SensorScheduler:
     """센서 데이터 API 스케줄러 클래스"""
 
 
-    BASE_URL = os.getenv("KY_DEVICE_DATA_URL", "https://api-wmumpxg2lq-du.a.run.app/api/device-data")
+    BASE_URL = os.getenv("KY_DEVICE_DATA_URL")
     API_TOKEN = os.getenv("KY_API_TOKEN", "") #인증 토큰 생길 시 사용
 
     TIMEOUT_SEC = float(os.getenv("KY_API_TIMEOUT", "10"))

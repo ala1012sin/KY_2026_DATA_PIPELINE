@@ -1,17 +1,19 @@
 from datetime import datetime
 from typing import Optional, Union
 
+import os
 import requests
 
 from Logger import Logger as logger
 from db.public.models import TB_DEVICE, TB_WARN_ERROR_LOG
 from infrastructure.queryFactory.base_orm import BaseQueryFactory
+from service.ew_code_mapper import decode_ew_code_text
 
 """완성본 XXXXX, 임시 파일"""
 class EWScheduler:
     """Error/Warning 데이터 API 스케줄러 클래스"""
 
-    BASE_URL = "https://api-wmumpxg2lq-du.a.run.app/api/error-data"
+    BASE_URL = os.getenv("KY_ERROR_DATA_URL")
     _ZERO_CODES = {"0x0000000000000000", "0x0", "0"}
 
     def __init__(self, db_session):
@@ -166,8 +168,16 @@ class EWScheduler:
 
                 error_code = self._normalize_code(item.get("error"))
                 warn_code = self._normalize_code(item.get("warn"))
-                error_note = item.get("errorNote") or item.get("error_note")
-                warn_note = item.get("warnNote") or item.get("warn_note")
+                error_note_raw = item.get("errorNote") or item.get("error_note")
+                warn_note_raw = item.get("warnNote") or item.get("warn_note")
+
+                error_note = (str(error_note_raw).strip() if error_note_raw is not None else "")
+                warn_note = (str(warn_note_raw).strip() if warn_note_raw is not None else "")
+
+                if error_code and not error_note:
+                    error_note = decode_ew_code_text(error_code)
+                if warn_code and not warn_note:
+                    warn_note = decode_ew_code_text(warn_code)
 
                 if error_code:
                     inserted = self._insert_ew_log(
@@ -175,7 +185,7 @@ class EWScheduler:
                         ew_dt=ew_dt,
                         code=error_code,
                         error_warn=0,
-                        ew_note=error_note,
+                        ew_note=(error_note or None),
                     )
                     if inserted:
                         success_count += 1
@@ -186,7 +196,7 @@ class EWScheduler:
                         ew_dt=ew_dt,
                         code=warn_code,
                         error_warn=1,
-                        ew_note=warn_note,
+                        ew_note=(warn_note or None),
                     )
                     if inserted:
                         success_count += 1

@@ -75,7 +75,7 @@ def list_model_device_ids(exclude_warned: bool = False) -> List[str]:
 def load_best_model_metrics_table() -> pd.DataFrame:
     # 장비 성능표는 빈번히 재사용되므로 1회 로드 후 캐시
     try:
-        return build_device_level_table(out_dir=MODEL_ROOT, save_csv=False)
+        return build_device_level_table(out_dir=MODEL_ROOT)
     except Exception as e:
         logger.warning(f"[AI 예측] 오차율 테이블 로드 실패: {e}")
         return pd.DataFrame()
@@ -292,6 +292,19 @@ def predict_manual(device_id: str, rows: List[Dict[str, float]]) -> Dict[str, An
     }
 
 
+def _load_simulation_raw(device_id: str, start_dt: datetime, end_dt: datetime) -> pd.DataFrame:
+    try:
+        raw = fetch_pems_pro_log_df(start_dt=start_dt, end_dt=end_dt, device_ids=[device_id])
+    except DataNotFoundError as e:
+        raise HTTPException(status_code=404, detail="선택한 장비/기간에 데이터가 없습니다") from e
+
+    if raw.empty:
+        raise HTTPException(status_code=404, detail="선택한 장비/기간에 데이터가 없습니다")
+
+    sort_cols = ["LOG_DT", "LOG_ID"] if "LOG_ID" in raw.columns else ["LOG_DT"]
+    return raw.sort_values(sort_cols).copy()
+
+
 def build_simulation_template(device_id: str, lookback_hours: int = 24) -> Dict[str, Any]:
     # 시뮬레이션 시작 시점에 필요한 기준 정보(기준행/기준예측/수정가능필드) 구성
     if lookback_hours <= 0:
@@ -307,15 +320,7 @@ def build_simulation_template(device_id: str, lookback_hours: int = 24) -> Dict[
     base_dt = datetime.now()
     start_dt = base_dt - timedelta(hours=lookback_hours)
 
-    try:
-        raw = fetch_pems_pro_log_df(start_dt=start_dt, end_dt=base_dt, device_ids=[device_id])
-    except DataNotFoundError as e:
-        raise HTTPException(status_code=404, detail="선택한 장비/기간에 데이터가 없습니다") from e
-    if raw.empty:
-        raise HTTPException(status_code=404, detail="선택한 장비/기간에 데이터가 없습니다")
-
-    sort_cols = ["LOG_DT", "LOG_ID"] if "LOG_ID" in raw.columns else ["LOG_DT"]
-    raw = raw.sort_values(sort_cols)
+    raw = _load_simulation_raw(device_id=device_id, start_dt=start_dt, end_dt=base_dt)
     latest = raw.iloc[-1]
 
     editable_fields = resolve_editable_raw_fields(runner.feature_cols, list(raw.columns))
@@ -364,15 +369,8 @@ def run_simulation(
         raise HTTPException(status_code=404, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    try:
-        raw = fetch_pems_pro_log_df(start_dt=start_dt, end_dt=base_dt, device_ids=[device_id])
-    except DataNotFoundError as e:
-        raise HTTPException(status_code=404, detail="선택한 장비/기간에 데이터가 없습니다") from e
-    if raw.empty:
-        raise HTTPException(status_code=404, detail="선택한 장비/기간에 데이터가 없습니다")
 
-    sort_cols = ["LOG_DT", "LOG_ID"] if "LOG_ID" in raw.columns else ["LOG_DT"]
-    raw = raw.sort_values(sort_cols).copy()
+    raw = _load_simulation_raw(device_id=device_id, start_dt=start_dt, end_dt=base_dt)
     baseline_raw = raw.copy()
 
     editable_fields = resolve_editable_raw_fields(runner.feature_cols, list(raw.columns))

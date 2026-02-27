@@ -12,7 +12,6 @@ def build_device_level_table(
     min_usage_std_w=1.0,
     smape_max=200.0,
     r2_min=-5.0,
-    save_csv=False,
 ):
     # ---------------------------
     # 1) metrics 로드 (best_model + MAE_15m/MAE_30m + (있으면 sMAPE/R2/RMSE))
@@ -161,11 +160,6 @@ def build_device_level_table(
     # 정렬: 일단 pass 먼저, 그 다음 오차율 작은 순
     out = out.sort_values(["pass_filter", "NMAE_15_pct"], ascending=[False, True])
 
-    if save_csv:
-        out_path = os.path.join(out_dir, "report_device_level_table.csv")
-        out.to_csv(out_path, index=False, encoding="utf-8-sig")
-        print(f"Saved: {out_path}")
-
     # 요약도 같이
     n_total = out["device"].nunique()
     n_pass = out.loc[out["pass_filter"] == True, "device"].nunique()
@@ -175,5 +169,5 @@ def build_device_level_table(
 
 
 if __name__ == "__main__":
-    device_table = build_device_level_table("./ai_models/current", save_csv=False)
+    device_table = build_device_level_table("./ai_models/current")
     print(device_table.head(30))
