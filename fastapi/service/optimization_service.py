@@ -99,6 +99,12 @@ def solve_test_milp(
 
 
 def _load_device_threshold(device_id: str) -> Optional[float]:
+    """장비별 threshold.json에서 피크 임계치를 읽어 반환한다.
+
+    우선순위:
+    1) threshold_p95
+    2) threshold_meta.threshold
+    """
     threshold_path = Path(MODEL_ROOT) / f"device={device_id}" / "best_model" / "threshold.json"
     if not threshold_path.exists():
         return None
@@ -120,6 +126,7 @@ def _load_device_threshold(device_id: str) -> Optional[float]:
 
 
 def _mean_op_status_by_device(device_ids: List[str], lookback_hours: int) -> Dict[str, float]:
+    """최근 lookback 구간의 장비별 평균 OP_STATUS를 계산한다."""
     if not device_ids:
         return {}
 
@@ -220,9 +227,12 @@ def optimize_peak_dispatch_test(
     horizons = [15, 30]
     h_count = len(horizons)
 
+    # idle 장비 인덱스(이진변수 y를 둘 장비) 추출
     idle_indices = [i for i, row in enumerate(records) if row["is_idle"]]
     idle_pos = {idx: pos for pos, idx in enumerate(idle_indices)}
 
+    # 결정변수 벡터를 1차원으로 평탄화해서 구성:
+    # [u(i,h), v(i,h), s(i,h), z(h), y(i)]
     u_base = 0
     v_base = u_base + n * h_count
     s_base = v_base + n * h_count
@@ -249,6 +259,10 @@ def optimize_peak_dispatch_test(
     th = np.array([row["threshold"] for row in records], dtype=float)
     is_donor = np.array([bool(row["is_donor"]) for row in records], dtype=bool)
 
+    # 목적함수 계수:
+    # - z: 전체 피크 최소화
+    # - s: 임계치 초과(slack) 강한 패널티
+    # - y/u(idle): idle 장비 사용 최소화
     c = np.zeros(var_count, dtype=float)
     w_peak = 1.0
     w_slack = 1000.0
@@ -281,8 +295,10 @@ def optimize_peak_dispatch_test(
     for i in idle_indices:
         ub[y_idx(i)] = 1.0
 
+    # 선형 제약식 리스트
     constraints: List[LinearConstraint] = []
 
+    # (1) 수급 균형: 시점별 총 유입(u) == 총 유출(v)
     for h in range(h_count):
         row = np.zeros(var_count, dtype=float)
         for i in range(n):
@@ -292,6 +308,8 @@ def optimize_peak_dispatch_test(
 
     for i in range(n):
         for h in range(h_count):
+            # (2) 임계치 제약 완화:
+            # p - v + u <= threshold + slack
             row_threshold = np.zeros(var_count, dtype=float)
             row_threshold[u_idx(i, h)] = 1.0
             row_threshold[v_idx(i, h)] = -1.0
@@ -300,6 +318,8 @@ def optimize_peak_dispatch_test(
                 LinearConstraint(row_threshold.reshape(1, -1), -np.inf, np.array([th[i] - p[i, h]]))
             )
 
+            # (3) 피크 상한 제약:
+            # p - v + u <= z_h
             row_peak = np.zeros(var_count, dtype=float)
             row_peak[u_idx(i, h)] = 1.0
             row_peak[v_idx(i, h)] = -1.0
@@ -307,6 +327,8 @@ def optimize_peak_dispatch_test(
             constraints.append(LinearConstraint(row_peak.reshape(1, -1), -np.inf, np.array([-p[i, h]])))
 
             if is_donor[i]:
+                # (4) donor 유출 한계:
+                # donor는 자기 초과 필요량(exceed_need)을 넘겨서 내보내지 않음
                 exceed_need = max(0.0, p[i, h] - th[i])
                 row_donor_cap = np.zeros(var_count, dtype=float)
                 row_donor_cap[v_idx(i, h)] = 1.0
@@ -314,6 +336,8 @@ def optimize_peak_dispatch_test(
 
     for i in idle_indices:
         for h in range(h_count):
+            # (5) idle 활성 연계(big-M):
+            # y_i=0이면 u(i,h)=0, y_i=1일 때만 유입 허용
             headroom = max(0.0, th[i] - p[i, h])
             donor_over = sum(max(0.0, p[j, h] - th[j]) for j in range(n) if is_donor[j])
             m_value = headroom + donor_over + 1.0

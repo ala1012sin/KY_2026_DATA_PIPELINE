@@ -9,7 +9,6 @@ from db.public.models import TB_DEVICE, TB_WARN_ERROR_LOG
 from infrastructure.queryFactory.base_orm import BaseQueryFactory
 from service.ew_code_mapper import decode_ew_code_text
 
-"""완성본 XXXXX, 임시 파일"""
 class EWScheduler:
     """Error/Warning 데이터 API 스케줄러 클래스"""
 

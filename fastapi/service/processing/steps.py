@@ -113,16 +113,20 @@ def add_feature_engineering(
         # 변화량
         for k in diff_steps:
             d[f"{col}_diff{k}"] = gb[col].diff(k)
-        # 0 계산 대비
+            
+        # 변화율 피처(장비별 스케일 차이를 줄이고 급변 신호를 반영)
+        # 분모 0 근처 수치 불안정은 pct_eps로 완화
         if add_pct_change:
             for k in diff_steps:
                 prev = gb[col].shift(k)
                 d[f"{col}_pct{k}"] = (d[col] - prev) / (np.abs(prev) + pct_eps)
+                
         # Rolling 
         for w in roll_windows:
             d[f"{col}_roll{w}_mean"] = gb[col].rolling(w).mean().reset_index(level=reset_lv, drop=True)
             if add_roll_std:
                 d[f"{col}_roll{w}_std"]  = gb[col].rolling(w).std().reset_index(level=reset_lv, drop=True)
+                
         # 과거값
         for k in lag_steps:
             d[f"{col}_lag{k}"] = gb[col].shift(k)
