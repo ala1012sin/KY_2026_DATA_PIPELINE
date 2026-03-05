@@ -469,6 +469,7 @@
             base_timestamp: templateData?.base_timestamp || '',
             base_log_id: templateData?.base_log_id ?? null,
             overrides: { [field]: Number(value) },
+            save_log: false,
           };
 
           const res = await fetch('/api/simulate/predict', {
@@ -658,7 +659,8 @@
           lookback_hours: lookback,
           base_timestamp: templateData?.base_timestamp || '',
           base_log_id: templateData?.base_log_id ?? null,
-          overrides
+          overrides,
+          save_log: true,
         };
 
         const res = await fetch('/api/simulate/predict', {

@@ -2,7 +2,7 @@ from sqlalchemy.orm import relationship
 from db.base import Base
 import uuid
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, Float, DateTime, ForeignKey, Text, BigInteger
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship, sessionmaker, declarative_base
 
 # Base 클래스 생성
@@ -38,6 +38,7 @@ class TB_DEVICE(Base):
     pemsproplus_logs = relationship("TB_PEMSPROPLUS_LOG", back_populates="device")
     pems_pro_logs = relationship("TB_PEMS_PRO_LOG", back_populates="device")
     ai_pems_logs = relationship("TB_AI_PEMS_LOG", back_populates="device")
+    simulation_logs = relationship("TB_SIMULATION_LOG", back_populates="device")
 
 class TB_VIBRATION_LOG(Base):
     __tablename__ = 'TB_VIBRATION_LOG'
@@ -144,4 +145,21 @@ class TB_AI_PEMS_LOG(Base):
     mg_refill_time = Column(Integer, name='MGREFILLTIME', nullable=True)
     
     device = relationship("TB_DEVICE", back_populates="ai_pems_logs")
+
+
+class TB_SIMULATION_LOG(Base):
+    __tablename__ = 'TB_SIMULATION_LOG'
+
+    log_id = Column(BigInteger, primary_key=True, autoincrement=True, name='LOG_ID')
+    device_id = Column(UUID(as_uuid=True), ForeignKey('TB_DEVICE.DEVICE_ID'), nullable=False, name='DEVICE_ID')
+    baseline_pd_time = Column(DateTime, name='BASELINE_PD_TIME', nullable=False)
+    search_time = Column(Integer, name='SEARCH_TIME', nullable=False)
+    use_model = Column(String(50), name='USE_MODEL', nullable=False)
+    available_feature = Column(Integer, name='AVAILABLE_FEATURE', nullable=False)
+    change_feature = Column(Integer, name='CHANGE_FEATURE', nullable=True)
+    result_value = Column(JSONB, name='RESULT_VALUE', nullable=True)
+    change_column_info = Column(JSONB, name='CHANGE_COLUMN_INFO', nullable=True)
+    feature_importance = Column(JSONB, name='FEATURE_IMPORTANCE', nullable=True)
+
+    device = relationship("TB_DEVICE", back_populates="simulation_logs")
     

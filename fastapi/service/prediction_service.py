@@ -12,6 +12,9 @@ import pandas as pd
 from fastapi import HTTPException
 
 from Logger import Logger as logger
+from db.public.models import TB_SIMULATION_LOG
+from infrastructure.queryFactory.base_orm import BaseQueryFactory
+from setting.database_orm import db_connection_pool
 from service.model_store import ModelStore
 from service.processing.config import PreprocessConfig
 from service.processing.create_report import build_device_level_table
@@ -355,6 +358,7 @@ def run_simulation(
     lookback_hours: int,
     base_timestamp: str,
     base_log_id: Optional[int] = None,
+    save_log: bool = True,
 ) -> Dict[str, Any]:
     # 기준행 기반 override를 적용하고 baseline/simulated를 같은 조건으로 비교
     if lookback_hours <= 0:
@@ -436,6 +440,104 @@ def run_simulation(
     y15_sim = float(sim_pred.get("y_15_pred", 0.0))
     y30_sim = float(sim_pred.get("y_30_pred", 0.0))
 
+    result_value = {
+        "baseline": {
+            "y_15_pred": y15_base,
+            "y_30_pred": y30_base,
+        },
+        "simulated": {
+            "y_15_pred": y15_sim,
+            "y_30_pred": y30_sim,
+        },
+        "delta": {
+            "y_15_pred": y15_sim - y15_base,
+            "y_30_pred": y30_sim - y30_base,
+            "y_15_pct": (0.0 if y15_base == 0 else ((y15_sim - y15_base) / abs(y15_base) * 100.0)),
+            "y_30_pct": (0.0 if y30_base == 0 else ((y30_sim - y30_base) / abs(y30_base) * 100.0)),
+        },
+    }
+
+    change_rows: List[Dict[str, Any]] = []
+    for field, after_value in effective_overrides.items():
+        before_raw = baseline_raw.loc[target_idx, field] if field in baseline_raw.columns else None
+        before_value = None if pd.isna(before_raw) else float(before_raw)
+        after_num = float(after_value)
+        delta_value = None if before_value is None else (after_num - before_value)
+        delta_pct = (
+            None
+            if before_value is None or before_value == 0
+            else ((after_num - before_value) / abs(before_value) * 100.0)
+        )
+        change_rows.append({
+            "feature_name": field,
+            "before_value": before_value,
+            "after_value": after_num,
+            "delta_value": delta_value,
+            "delta_pct": delta_pct,
+        })
+
+    change_column_info = {"changes": change_rows}
+
+    feature_importance = {
+        "model_name": str(runner.best_model),
+        "importance_method": "gain",
+        "features": [],
+    }
+    if str(runner.model_type).upper() == "XGB":
+        try:
+            booster = runner.model_obj["15"].get_booster()
+            raw_scores = booster.get_score(importance_type="gain")
+            scored_features: List[Dict[str, Any]] = []
+            for key, value in raw_scores.items():
+                feature_name = key
+                if isinstance(key, str) and key.startswith("f") and key[1:].isdigit():
+                    idx = int(key[1:])
+                    if 0 <= idx < len(runner.feature_cols):
+                        feature_name = runner.feature_cols[idx]
+                scored_features.append({
+                    "feature_name": feature_name,
+                    "importance_value": float(value),
+                })
+
+            scored_features = sorted(scored_features, key=lambda item: item["importance_value"], reverse=True)
+            feature_importance["features"] = [
+                {
+                    "rank": rank,
+                    "feature_name": item["feature_name"],
+                    "importance_value": item["importance_value"],
+                }
+                for rank, item in enumerate(scored_features, start=1)
+            ]
+        except Exception as e:
+            logger.warning(f"[AI 시뮬레이션] feature importance 추출 실패: {e}")
+
+    if save_log and len(effective_overrides) > 0:
+        db_gen = db_connection_pool()
+        db = next(db_gen)
+        try:
+            BaseQueryFactory(db, TB_SIMULATION_LOG).insert_single_row(
+                device_id=device_id,
+                baseline_pd_time=pd.Timestamp(target_ts).to_pydatetime(),
+                search_time=int(lookback_hours),
+                use_model=str(runner.best_model),
+                available_feature=len(editable_fields),
+                change_feature=len(effective_overrides),
+                result_value=result_value,
+                change_column_info=change_column_info,
+                feature_importance=feature_importance,
+            )
+        except Exception as e:
+            logger.error(f"[AI 시뮬레이션] 결과 저장 실패 device_id={device_id}: {e}")
+        finally:
+            try:
+                next(db_gen)
+            except StopIteration:
+                pass
+    elif save_log:
+        logger.info(
+            f"[AI 시뮬레이션] 저장 스킵(변경값 없음) device_id={device_id}, lookback_hours={lookback_hours}"
+        )
+
     return {
         "device_id": device_id,
         "base_timestamp": pd.Timestamp(target_ts).isoformat(),
@@ -444,10 +546,5 @@ def run_simulation(
         "simulated": simulated,
         "error_rates": get_device_error_rates(device_id),
         "simulation_notice": get_device_simulation_notice(device_id),
-        "delta": {
-            "y_15_pred": y15_sim - y15_base,
-            "y_30_pred": y30_sim - y30_base,
-            "y_15_pct": (0.0 if y15_base == 0 else ((y15_sim - y15_base) / abs(y15_base) * 100.0)),
-            "y_30_pct": (0.0 if y30_base == 0 else ((y30_sim - y30_base) / abs(y30_base) * 100.0)),
-        },
+        "delta": result_value["delta"],
     }

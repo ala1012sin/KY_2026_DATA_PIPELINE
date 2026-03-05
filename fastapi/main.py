@@ -116,10 +116,10 @@ async def _run_sensor_job(minutes: int = 1) -> None:
 
 
 
-@scheduler.scheduled_job("interval", seconds=60)
-async def sensor_cron_job():
-    # 60초마다 최근 1분 데이터 처리
-    await _run_sensor_job(minutes=1)
+#@scheduler.scheduled_job("interval", seconds=60)
+#async def sensor_cron_job():
+#    # 60초마다 최근 1분 데이터 처리
+#    await _run_sensor_job(minutes=1)
 
 # 아직 에러 데이터 수신이 되지 않아 주석 처리
 #@scheduler.scheduled_job("interval", minutes=1) 

@@ -1,5 +1,7 @@
 import os
 import time
+import json
+import csv
 from datetime import datetime
 from typing import Dict, Optional, Union
 
@@ -22,9 +24,16 @@ class SensorScheduler:
     RETRIES = int(os.getenv("KY_API_RETRIES", "2")) 
     RETRY_BACKOFF_SEC = float(os.getenv("KY_API_RETRY_BACKOFF", "1.0"))
 
+    # 디버그용
     LOG_DETAIL = os.getenv("KY_API_LOG_DETAIL", "0") == "1"   # 1이면 URL/바디 일부 출력
     FAIL_HARD  = os.getenv("KY_API_FAIL_HARD", "0") == "1"    # 1이면 raise 해서 잡 실패
+    # DUMP_RAW_API = os.getenv("KY_API_DUMP_RAW", "1") == "1"   # 1이면 API 원본 전체 로그 출력
+    # DISABLE_DB_WRITE = os.getenv("KY_DISABLE_DB_WRITE", "1") == "1"  # 1이면 DB 적재 비활성화
+    # EXPORT_IDENTITY_FILE = os.getenv("KY_API_EXPORT_IDENTITY_FILE", "1") == "1"  # 1이면 식별자 요약 파일 저장
+    # EXPORT_IDENTITY_CSV_PATH = os.getenv("KY_API_EXPORT_IDENTITY_CSV_PATH", "/app/api_debug/device_identity_latest.csv")
+    # EXPORT_IDENTITY_JSON_PATH = os.getenv("KY_API_EXPORT_IDENTITY_JSON_PATH", "/app/api_debug/device_identity_latest.json")
     
+    # 데이터 조회 후 분류 용
     DEVICE_TYPE_AI_PEMS = 1
     DEVICE_TYPE_PEMSPRO = 2
     DEVICE_TYPE_PEMSPROPLUS = 3
@@ -197,6 +206,78 @@ class SensorScheduler:
         if isinstance(dt_str, str):
             return datetime.strptime(dt_str, '%Y%m%d%H%M%S')
         return dt_str
+
+
+    # 디버그 용 코드
+    #def _dump_api_payload(self, data: list) -> None:
+    #    """API 원본 데이터를 로그로 출력"""
+    #    self.logger.info(f"KY API 원본 덤프 시작: 총 {len(data)}건")
+    #    for idx, item in enumerate(data, start=1):
+    #        try:
+    #            self.logger.info(f"KY API RAW[{idx}/{len(data)}]: {json.dumps(item, ensure_ascii=False, default=str)}")
+    #        except Exception as e:
+    #            self.logger.error(f"KY API RAW[{idx}] 직렬화 실패: {e}")
+    #            self.logger.info(f"KY API RAW[{idx}] repr: {repr(item)}")
+    #    self.logger.info("KY API 원본 덤프 종료")
+
+    def _export_identity_files(self, data: list) -> None:
+        """API 데이터의 식별자(serialNo/deviceType/deviceNum) 요약을 파일로 저장"""
+        rows = []
+        identity_set = set()
+
+        for item in data:
+            device_info = item.get('deviceInfo', {}) if isinstance(item, dict) else {}
+            serial_no = device_info.get('serialNo')
+            device_type = device_info.get('deviceType')
+            device_num = device_info.get('deviceNum')
+            dt_value = item.get('dt') if isinstance(item, dict) else None
+
+            row = {
+                'dt': dt_value,
+                'serialNo': serial_no,
+                'deviceType': device_type,
+                'deviceNum': device_num,
+                'identity_key': f"{serial_no}|{device_type}|{device_num}",
+            }
+            rows.append(row)
+            identity_set.add((str(serial_no), str(device_type), str(device_num)))
+
+        unique_identity_count = len(identity_set)
+
+        try:
+            csv_dir = os.path.dirname(self.EXPORT_IDENTITY_CSV_PATH)
+            if csv_dir:
+                os.makedirs(csv_dir, exist_ok=True)
+
+            with open(self.EXPORT_IDENTITY_CSV_PATH, 'w', newline='', encoding='utf-8') as csv_file:
+                fieldnames = ['dt', 'serialNo', 'deviceType', 'deviceNum', 'identity_key']
+                writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(rows)
+
+            self.logger.info(
+                f"식별자 CSV 저장 완료: {self.EXPORT_IDENTITY_CSV_PATH} "
+                f"(원본 {len(rows)}건, 고유키 {unique_identity_count}개)"
+            )
+        except Exception as e:
+            self.logger.error(f"식별자 CSV 저장 실패: {e}")
+
+        try:
+            json_dir = os.path.dirname(self.EXPORT_IDENTITY_JSON_PATH)
+            if json_dir:
+                os.makedirs(json_dir, exist_ok=True)
+
+            payload = {
+                'fetched_count': len(rows),
+                'unique_identity_count': unique_identity_count,
+                'identities': rows,
+            }
+            with open(self.EXPORT_IDENTITY_JSON_PATH, 'w', encoding='utf-8') as json_file:
+                json.dump(payload, json_file, ensure_ascii=False, indent=2, default=str)
+
+            self.logger.info(f"식별자 JSON 저장 완료: {self.EXPORT_IDENTITY_JSON_PATH}")
+        except Exception as e:
+            self.logger.error(f"식별자 JSON 저장 실패: {e}")
 
     def process_pemsproplus(self, pemsproplus_data: list) -> int:
         """
@@ -493,6 +574,20 @@ class SensorScheduler:
             # 데이터가 없으면 즉시 종료
             self.logger.warning("처리할 데이터가 없습니다.")
             return
+
+        # 디버그 용 코드 (커밋용으로 비활성화)
+        # 옵션: 식별자 파일 출력 (원격에서 직접 확인용)
+        # if self.EXPORT_IDENTITY_FILE:
+        #     self._export_identity_files(data)
+
+        # 옵션: API 원본 전체 로그 출력
+        # if self.DUMP_RAW_API:
+        #     self._dump_api_payload(data)
+
+        # 옵션: DB 적재 비활성화 (중복 적재 방지용)
+        # if self.DISABLE_DB_WRITE:
+        #     self.logger.warning("KY_DISABLE_DB_WRITE=1 설정으로 DB 적재를 건너뜁니다.")
+        #     return
 
         # 2. 데이터 분류 (PERMPRO, PEMSPROPLUS, FLOW)
         ai_pems_data, pemspro_data, pemsproplus_data, flow_data = self.classify_data(data)
