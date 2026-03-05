@@ -69,6 +69,7 @@ def simulate_predict(req: SimulatePredictRequest):
             lookback_hours=req.lookback_hours,
             base_timestamp=req.base_timestamp,
             base_log_id=req.base_log_id,
+            # 영향도 계산 요청 등에서는 저장을 끌 수 있도록 요청값 전달
             save_log=req.save_log,
         )
         record_api_event(endpoint="/simulate/predict", device_id=req.device_id, status_code=200)

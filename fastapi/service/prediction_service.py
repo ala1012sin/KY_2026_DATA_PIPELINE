@@ -440,6 +440,7 @@ def run_simulation(
     y15_sim = float(sim_pred.get("y_15_pred", 0.0))
     y30_sim = float(sim_pred.get("y_30_pred", 0.0))
 
+    # DB RESULT_VALUE(JSONB) 스키마에 맞춰 baseline/simulated/delta를 구성
     result_value = {
         "baseline": {
             "y_15_pred": y15_base,
@@ -457,6 +458,7 @@ def run_simulation(
         },
     }
 
+    # 변경된 입력 컬럼별 before/after/증감 정보를 JSON 배열로 저장
     change_rows: List[Dict[str, Any]] = []
     for field, after_value in effective_overrides.items():
         before_raw = baseline_raw.loc[target_idx, field] if field in baseline_raw.columns else None
@@ -478,6 +480,7 @@ def run_simulation(
 
     change_column_info = {"changes": change_rows}
 
+    # XGB 모델 사용 시 gain 기반 피처 중요도를 기록(기타 모델은 빈 배열 유지)
     feature_importance = {
         "model_name": str(runner.best_model),
         "importance_method": "gain",
@@ -511,6 +514,7 @@ def run_simulation(
         except Exception as e:
             logger.warning(f"[AI 시뮬레이션] feature importance 추출 실패: {e}")
 
+    # 저장 요청(save_log=true)이고 실제 변경값이 있을 때만 시뮬 로그를 적재
     if save_log and len(effective_overrides) > 0:
         db_gen = db_connection_pool()
         db = next(db_gen)
@@ -533,6 +537,7 @@ def run_simulation(
                 next(db_gen)
             except StopIteration:
                 pass
+    # 저장 요청은 있었지만 변경값이 없으면 로그 적재를 생략
     elif save_log:
         logger.info(
             f"[AI 시뮬레이션] 저장 스킵(변경값 없음) device_id={device_id}, lookback_hours={lookback_hours}"
