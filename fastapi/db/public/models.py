@@ -1,7 +1,19 @@
 from sqlalchemy.orm import relationship
 from db.base import Base
 import uuid
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, Float, DateTime, ForeignKey, Text, BigInteger
+from sqlalchemy import (
+    create_engine,
+    Column,
+    Integer,
+    String,
+    Boolean,
+    Float,
+    DateTime,
+    ForeignKey,
+    Text,
+    BigInteger,
+    Numeric,
+)
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship, sessionmaker, declarative_base
 
@@ -17,6 +29,7 @@ class TB_CUSTOMER(Base):
 
     # Relationship (1:N with Device)
     devices = relationship("TB_DEVICE", back_populates="customer")
+    peak_dispatch_runs = relationship("TB_PEAK_DISPATCH_RUN", back_populates="customer")
 
 class TB_DEVICE(Base):
     __tablename__ = 'TB_DEVICE'
@@ -39,6 +52,7 @@ class TB_DEVICE(Base):
     pems_pro_logs = relationship("TB_PEMS_PRO_LOG", back_populates="device")
     ai_pems_logs = relationship("TB_AI_PEMS_LOG", back_populates="device")
     simulation_logs = relationship("TB_SIMULATION_LOG", back_populates="device")
+    peak_dispatch_results = relationship("TB_PEAK_DISPATCH_DEVICE_RESULT", back_populates="device")
 
 class TB_VIBRATION_LOG(Base):
     __tablename__ = 'TB_VIBRATION_LOG'
@@ -162,4 +176,66 @@ class TB_SIMULATION_LOG(Base):
     feature_importance = Column(JSONB, name='FEATURE_IMPORTANCE', nullable=True)
 
     device = relationship("TB_DEVICE", back_populates="simulation_logs")
+
+
+class TB_PEAK_DISPATCH_RUN(Base):
+    __tablename__ = 'TB_PEAK_DISPATCH_RUN'
+
+    peak_run_id = Column(BigInteger, primary_key=True, autoincrement=True, name='PEAK_RUN_ID')
+    customer_id = Column(UUID(as_uuid=True), ForeignKey('TB_CUSTOMER.CUSTOMER_ID'), nullable=True, name='CUSTOMER_ID')
+    status = Column(Text, name='STATUS', nullable=False)
+    success = Column(Boolean, name='SUCCESS', nullable=False, default=False)
+    message = Column(Text, name='MESSAGE', nullable=True)
+    lookback_hours = Column(Integer, name='LOOKBACK_HOURS', nullable=False)
+    top_k = Column(Integer, name='TOP_K', nullable=False)
+    idle_op_status_threshold = Column(Numeric(6, 4), name='IDLE_OP_STATUS_THRESHOLD', nullable=False)
+    force_exceed_demo = Column(Boolean, name='FORCE_EXCEED_DEMO', nullable=False, default=False)
+    force_exceed_margin_ratio = Column(Numeric(6, 4), name='FORCE_EXCEED_MARGIN_RATIO', nullable=False)
+    device_count = Column(Integer, name='DEVICE_COUNT', nullable=False)
+    peak_15_before = Column(Numeric(12, 3), name='PEAK_15_BEFORE', nullable=False)
+    peak_15_after = Column(Numeric(12, 3), name='PEAK_15_AFTER', nullable=False)
+    peak_30_before = Column(Numeric(12, 3), name='PEAK_30_BEFORE', nullable=False)
+    peak_30_after = Column(Numeric(12, 3), name='PEAK_30_AFTER', nullable=False)
+    objective_peak_sum = Column(Numeric(14, 3), name='OBJECTIVE_PEAK_SUM', nullable=False)
+    total_slack = Column(Numeric(14, 3), name='TOTAL_SLACK', nullable=False)
+    donor_device_ids = Column(JSONB, name='DONOR_DEVICE_IDS', nullable=True)
+    idle_device_ids = Column(JSONB, name='IDLE_DEVICE_IDS', nullable=True)
+    allocation_plan = Column(JSONB, name='ALLOCATION_PLAN', nullable=True)
+    created_at = Column(DateTime, name='CREATED_AT', nullable=False)
+
+    customer = relationship("TB_CUSTOMER", back_populates="peak_dispatch_runs")
+    device_results = relationship("TB_PEAK_DISPATCH_DEVICE_RESULT", back_populates="peak_dispatch_run", cascade="all, delete-orphan")
+
+
+class TB_PEAK_DISPATCH_DEVICE_RESULT(Base):
+    __tablename__ = 'TB_PEAK_DISPATCH_DEVICE_RESULT'
+
+    result_id = Column(BigInteger, primary_key=True, autoincrement=True, name='RESULT_ID')
+    peak_run_id = Column(BigInteger, ForeignKey('TB_PEAK_DISPATCH_RUN.PEAK_RUN_ID', ondelete='CASCADE'), nullable=False, name='PEAK_RUN_ID')
+    device_id = Column(UUID(as_uuid=True), ForeignKey('TB_DEVICE.DEVICE_ID'), nullable=False, name='DEVICE_ID')
+    is_donor = Column(Boolean, name='IS_DONOR', nullable=False)
+    is_idle = Column(Boolean, name='IS_IDLE', nullable=False)
+    op_status_mean = Column(Numeric(8, 5), name='OP_STATUS_MEAN', nullable=False)
+    threshold = Column(Numeric(12, 3), name='THRESHOLD', nullable=False)
+    baseline_15 = Column(Numeric(12, 3), name='BASELINE_15', nullable=False)
+    baseline_30 = Column(Numeric(12, 3), name='BASELINE_30', nullable=False)
+    optimized_15 = Column(Numeric(12, 3), name='OPTIMIZED_15', nullable=False)
+    optimized_30 = Column(Numeric(12, 3), name='OPTIMIZED_30', nullable=False)
+    delta_15 = Column(Numeric(12, 3), name='DELTA_15', nullable=False)
+    delta_30 = Column(Numeric(12, 3), name='DELTA_30', nullable=False)
+    shift_in_15 = Column(Numeric(12, 3), name='SHIFT_IN_15', nullable=False)
+    shift_in_30 = Column(Numeric(12, 3), name='SHIFT_IN_30', nullable=False)
+    shift_out_15 = Column(Numeric(12, 3), name='SHIFT_OUT_15', nullable=False)
+    shift_out_30 = Column(Numeric(12, 3), name='SHIFT_OUT_30', nullable=False)
+    required_shift_15 = Column(Numeric(12, 3), name='REQUIRED_SHIFT_15', nullable=False)
+    required_shift_30 = Column(Numeric(12, 3), name='REQUIRED_SHIFT_30', nullable=False)
+    slack_15 = Column(Numeric(12, 3), name='SLACK_15', nullable=False)
+    slack_30 = Column(Numeric(12, 3), name='SLACK_30', nullable=False)
+    distributed_targets_15 = Column(JSONB, name='DISTRIBUTED_TARGETS_15', nullable=True)
+    distributed_targets_30 = Column(JSONB, name='DISTRIBUTED_TARGETS_30', nullable=True)
+    distribution_text = Column(Text, name='DISTRIBUTION_TEXT', nullable=True)
+    created_at = Column(DateTime, name='CREATED_AT', nullable=False)
+
+    peak_dispatch_run = relationship("TB_PEAK_DISPATCH_RUN", back_populates="device_results")
+    device = relationship("TB_DEVICE", back_populates="peak_dispatch_results")
     

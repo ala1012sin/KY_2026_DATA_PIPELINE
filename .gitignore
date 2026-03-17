@@ -14,8 +14,16 @@ __pycache__/
 fastapi/out_preprocess/
 
 # model artifacts / heavy outputs
-fastapi/ai_models/
 fastapi/backup/
 *.dump
+
+# ai_models: keep only current in git
+fastapi/ai_models/**
+!fastapi/ai_models/
+!fastapi/ai_models/current/
+!fastapi/ai_models/current/**
+
+# debug 파일 commit 방지
+fastapi/api_debug
 
 *:Zone.Identifier
