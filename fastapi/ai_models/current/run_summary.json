@@ -1,0 +1,181 @@
+{
+  "supervised_csv_path": "./out_preprocess/preprocessed_supervised.csv",
+  "time_col": "LOG_DT",
+  "device_col": "DEVICE_ID",
+  "out_dir": "./out_train",
+  "n_devices_seen": 42,
+  "n_devices_trained": 29,
+  "files": {
+    "all_model_results": "./out_train/all_model_results.csv",
+    "best_models_summary": "./out_train/best_models_summary.csv"
+  },
+  "saved_models": [
+    {
+      "device": "0eab2f31-db53-42b5-9ff1-bc0decf1e90a",
+      "path": "./out_train/device=0eab2f31-db53-42b5-9ff1-bc0decf1e90a/best_model",
+      "best_model": "XGBoost"
+    },
+    {
+      "device": "10020b75-e523-45b8-8905-4763865d6e19",
+      "path": "./out_train/device=10020b75-e523-45b8-8905-4763865d6e19/best_model",
+      "best_model": "XGBoost"
+    },
+    {
+      "device": "110be74d-165d-407c-8b7c-ac8ea1a5ecd4",
+      "path": "./out_train/device=110be74d-165d-407c-8b7c-ac8ea1a5ecd4/best_model",
+      "best_model": "XGBoost"
+    },
+    {
+      "device": "19a59e1a-d32e-4494-8bbe-48d93b5927e6",
+      "path": "./out_train/device=19a59e1a-d32e-4494-8bbe-48d93b5927e6/best_model",
+      "best_model": "XGBoost"
+    },
+    {
+      "device": "3ccf37fc-247d-42ae-92bb-99c08aa4d1f7",
+      "path": "./out_train/device=3ccf37fc-247d-42ae-92bb-99c08aa4d1f7/best_model",
+      "best_model": "XGBoost"
+    },
+    {
+      "device": "3ea267c5-5e6f-4cd9-80d9-fd8817f4b807",
+      "path": "./out_train/device=3ea267c5-5e6f-4cd9-80d9-fd8817f4b807/best_model",
+      "best_model": "XGBoost"
+    },
+    {
+      "device": "3f777693-5345-428e-bf52-0b575fc53f20",
+      "path": "./out_train/device=3f777693-5345-428e-bf52-0b575fc53f20/best_model",
+      "best_model": "XGBoost"
+    },
+    {
+      "device": "43509ccb-0613-415f-9115-b9a1732a9c0c",
+      "path": "./out_train/device=43509ccb-0613-415f-9115-b9a1732a9c0c/best_model",
+      "best_model": "XGBoost"
+    },
+    {
+      "device": "450102af-8be0-491a-bbd3-6399d9e70f68",
+      "path": "./out_train/device=450102af-8be0-491a-bbd3-6399d9e70f68/best_model",
+      "best_model": "XGBoost"
+    },
+    {
+      "device": "684ce2ca-716e-47f0-a3b8-5cc60395f4a2",
+      "path": "./out_train/device=684ce2ca-716e-47f0-a3b8-5cc60395f4a2/best_model",
+      "best_model": "RCNN"
+    },
+    {
+      "device": "6bb1fe3b-a775-4cf5-8bbb-6f435814cee5",
+      "path": "./out_train/device=6bb1fe3b-a775-4cf5-8bbb-6f435814cee5/best_model",
+      "best_model": "XGBoost"
+    },
+    {
+      "device": "724f4c96-2c07-49af-a06e-17bdefdc7db9",
+      "path": "./out_train/device=724f4c96-2c07-49af-a06e-17bdefdc7db9/best_model",
+      "best_model": "XGBoost"
+    },
+    {
+      "device": "76181b84-517a-4e3d-bd31-809ba092395a",
+      "path": "./out_train/device=76181b84-517a-4e3d-bd31-809ba092395a/best_model",
+      "best_model": "XGBoost"
+    },
+    {
+      "device": "788824e1-39d8-468d-baa1-c0649a20fb08",
+      "path": "./out_train/device=788824e1-39d8-468d-baa1-c0649a20fb08/best_model",
+      "best_model": "XGBoost"
+    },
+    {
+      "device": "79e54d03-0f0f-41f8-a6a8-d6e2dbf7e012",
+      "path": "./out_train/device=79e54d03-0f0f-41f8-a6a8-d6e2dbf7e012/best_model",
+      "best_model": "XGBoost"
+    },
+    {
+      "device": "7ceee0a4-350f-401d-82a8-2bda9832268e",
+      "path": "./out_train/device=7ceee0a4-350f-401d-82a8-2bda9832268e/best_model",
+      "best_model": "XGBoost"
+    },
+    {
+      "device": "7da71867-aea3-4854-b152-db96a25ddf4f",
+      "path": "./out_train/device=7da71867-aea3-4854-b152-db96a25ddf4f/best_model",
+      "best_model": "GRU_LSTM"
+    },
+    {
+      "device": "7f1a43fb-9559-4d4c-af83-aadca7fd6686",
+      "path": "./out_train/device=7f1a43fb-9559-4d4c-af83-aadca7fd6686/best_model",
+      "best_model": "XGBoost"
+    },
+    {
+      "device": "88c15435-75a9-4058-a81e-38a0eda6bbe1",
+      "path": "./out_train/device=88c15435-75a9-4058-a81e-38a0eda6bbe1/best_model",
+      "best_model": "XGBoost"
+    },
+    {
+      "device": "ade6f3b3-abdd-4343-9b96-3007337822ac",
+      "path": "./out_train/device=ade6f3b3-abdd-4343-9b96-3007337822ac/best_model",
+      "best_model": "XGBoost"
+    },
+    {
+      "device": "b6230c0b-6c2d-4dae-b170-ce937f36ea48",
+      "path": "./out_train/device=b6230c0b-6c2d-4dae-b170-ce937f36ea48/best_model",
+      "best_model": "XGBoost"
+    },
+    {
+      "device": "c41dc419-efeb-4187-bdb7-ec3ea848e7ec",
+      "path": "./out_train/device=c41dc419-efeb-4187-bdb7-ec3ea848e7ec/best_model",
+      "best_model": "XGBoost"
+    },
+    {
+      "device": "cc74202d-eb54-4e29-886f-e08d0f0ba1cd",
+      "path": "./out_train/device=cc74202d-eb54-4e29-886f-e08d0f0ba1cd/best_model",
+      "best_model": "XGBoost"
+    },
+    {
+      "device": "d85b8f21-d9bd-4d8d-9399-7de17d74fae3",
+      "path": "./out_train/device=d85b8f21-d9bd-4d8d-9399-7de17d74fae3/best_model",
+      "best_model": "XGBoost"
+    },
+    {
+      "device": "e2387f36-6cbe-43de-84b4-539f74567499",
+      "path": "./out_train/device=e2387f36-6cbe-43de-84b4-539f74567499/best_model",
+      "best_model": "XGBoost"
+    },
+    {
+      "device": "e43f8a7a-2d75-4902-a1a0-27748f978ebd",
+      "path": "./out_train/device=e43f8a7a-2d75-4902-a1a0-27748f978ebd/best_model",
+      "best_model": "CNN1D"
+    },
+    {
+      "device": "efb83ace-045a-4068-9489-ddf58ddaa41b",
+      "path": "./out_train/device=efb83ace-045a-4068-9489-ddf58ddaa41b/best_model",
+      "best_model": "XGBoost"
+    },
+    {
+      "device": "f5a7cc72-ae15-4ccf-b5d2-1ad53fb2773a",
+      "path": "./out_train/device=f5a7cc72-ae15-4ccf-b5d2-1ad53fb2773a/best_model",
+      "best_model": "XGBoost"
+    },
+    {
+      "device": "fdcb9471-71c1-4d42-8e20-fb9ee7751669",
+      "path": "./out_train/device=fdcb9471-71c1-4d42-8e20-fb9ee7751669/best_model",
+      "best_model": "XGBoost"
+    }
+  ],
+  "tune_config": {
+    "out_dir": "./out_train",
+    "select_by": "MAE_avg",
+    "random_seed": 42,
+    "dl_use_engineered_features": false,
+    "min_rows_per_device_tabular": 30,
+    "enable_dl": true,
+    "seq_len": 16,
+    "min_seq_samples": 20,
+    "batch_size": 64,
+    "max_epochs": 30,
+    "early_stop_patience": 5,
+    "skip_inactive_by_op": true,
+    "op_col_name": "OP_STATUS",
+    "op_true_ratio_min": 0.05,
+    "xgb_trials": 25,
+    "dl_trials": 10,
+    "pruner_min_resource": 5,
+    "pruner_reduction_factor": 3,
+    "save_predictions_test": true,
+    "save_all_models": false
+  }
+}

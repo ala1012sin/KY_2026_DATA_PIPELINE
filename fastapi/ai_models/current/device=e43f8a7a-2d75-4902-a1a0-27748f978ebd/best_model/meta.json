@@ -1,0 +1,80 @@
+{
+  "device": "e43f8a7a-2d75-4902-a1a0-27748f978ebd",
+  "best_model": "CNN1D",
+  "best_params": {
+    "filters": 96,
+    "kernel_size": 7,
+    "dropout": 0.2,
+    "lr": 0.002869139536545374
+  },
+  "best_val_metrics": {
+    "MAE_15m": 2859.287353515625,
+    "RMSE_15m": 3844.4349389734766,
+    "sMAPE_15m": 67.02791989156144,
+    "R2_15m": -0.548813837494142,
+    "MAE_30m": 2100.84814453125,
+    "RMSE_30m": 3049.3922345280544,
+    "sMAPE_30m": 56.65125303596091,
+    "R2_30m": -0.5249768037747558,
+    "MAE_avg": 2480.0677490234375,
+    "RMSE_avg": 3446.9135867507657,
+    "sMAPE_avg": 61.83958646376118,
+    "R2_avg": -0.5368953206344489
+  },
+  "best_test_metrics": {
+    "MAE_15m": 1752.2318115234375,
+    "RMSE_15m": 2726.14352153367,
+    "sMAPE_15m": 45.79117496994261,
+    "R2_15m": -0.3266889474881902,
+    "MAE_30m": 1917.70263671875,
+    "RMSE_30m": 2896.0079419780604,
+    "sMAPE_30m": 50.95583931450032,
+    "R2_30m": -0.5667586961490769,
+    "MAE_avg": 1834.9672241210938,
+    "RMSE_avg": 2811.0757317558655,
+    "sMAPE_avg": 48.37350714222146,
+    "R2_avg": -0.44672382181863357
+  },
+  "tune_config": {
+    "out_dir": "./out_train",
+    "select_by": "MAE_avg",
+    "random_seed": 42,
+    "dl_use_engineered_features": false,
+    "min_rows_per_device_tabular": 30,
+    "enable_dl": true,
+    "seq_len": 16,
+    "min_seq_samples": 20,
+    "batch_size": 64,
+    "max_epochs": 30,
+    "early_stop_patience": 5,
+    "skip_inactive_by_op": true,
+    "op_col_name": "OP_STATUS",
+    "op_true_ratio_min": 0.05,
+    "xgb_trials": 25,
+    "dl_trials": 10,
+    "pruner_min_resource": 5,
+    "pruner_reduction_factor": 3,
+    "save_predictions_test": true,
+    "save_all_models": false
+  },
+  "n_rows_used": 186,
+  "n_features_used": 21,
+  "saved_model_files": [
+    "model_CNN1D.h5"
+  ],
+  "xgb_format": null,
+  "dl_format": "keras_zip",
+  "threshold_p95": 20474.33333333333,
+  "threshold_file": "threshold.json",
+  "threshold_meta": {
+    "quantile": 0.95,
+    "n_points": 141,
+    "filters": {
+      "use_train_only": true,
+      "use_business_hour_only": false,
+      "use_op_true_only": true
+    },
+    "target_col": "CURVOLTAGE",
+    "threshold": 20474.33333333333
+  }
+}

@@ -1,0 +1,89 @@
+{
+  "device": "43509ccb-0613-415f-9115-b9a1732a9c0c",
+  "best_model": "XGBoost",
+  "best_params": {
+    "n_estimators": 200,
+    "max_depth": 4,
+    "learning_rate": 0.05018421679288628,
+    "subsample": 0.9416221920015159,
+    "colsample_bytree": 0.6282572457368232,
+    "min_child_weight": 1,
+    "reg_lambda": 3.6407556542584274,
+    "gamma": 1.3678613939322415,
+    "random_state": 42,
+    "tree_method": "hist",
+    "n_jobs": -1,
+    "objective": "reg:squarederror"
+  },
+  "best_val_metrics": {
+    "MAE_15m": 199.7480926513672,
+    "RMSE_15m": 268.47110528881876,
+    "sMAPE_15m": 1.5533312463547455,
+    "R2_15m": 0.9674476849071094,
+    "MAE_30m": 144.620361328125,
+    "RMSE_30m": 219.68706436656666,
+    "sMAPE_30m": 1.1017637475339552,
+    "R2_30m": 0.9803408832745345,
+    "MAE_avg": 172.1842269897461,
+    "RMSE_avg": 244.07908482769272,
+    "sMAPE_avg": 1.3275474969443504,
+    "R2_avg": 0.973894284090822
+  },
+  "best_test_metrics": {
+    "MAE_15m": 2214.862060546875,
+    "RMSE_15m": 2650.5862559064176,
+    "sMAPE_15m": 16.415659492959232,
+    "R2_15m": -0.27475695189371985,
+    "MAE_30m": 2861.453857421875,
+    "RMSE_30m": 3397.151895338211,
+    "sMAPE_30m": 21.53888304202989,
+    "R2_30m": -0.8596860677368725,
+    "MAE_avg": 2538.157958984375,
+    "RMSE_avg": 3023.869075622314,
+    "sMAPE_avg": 18.97727126749456,
+    "R2_avg": -0.5672215098152962
+  },
+  "tune_config": {
+    "out_dir": "./out_train",
+    "select_by": "MAE_avg",
+    "random_seed": 42,
+    "dl_use_engineered_features": false,
+    "min_rows_per_device_tabular": 30,
+    "enable_dl": true,
+    "seq_len": 16,
+    "min_seq_samples": 20,
+    "batch_size": 64,
+    "max_epochs": 30,
+    "early_stop_patience": 5,
+    "skip_inactive_by_op": true,
+    "op_col_name": "OP_STATUS",
+    "op_true_ratio_min": 0.05,
+    "xgb_trials": 25,
+    "dl_trials": 10,
+    "pruner_min_resource": 5,
+    "pruner_reduction_factor": 3,
+    "save_predictions_test": true,
+    "save_all_models": false
+  },
+  "n_rows_used": 186,
+  "n_features_used": 45,
+  "saved_model_files": [
+    "model_xgb_15.json",
+    "model_xgb_30.json"
+  ],
+  "xgb_format": "save_model_json",
+  "dl_format": null,
+  "threshold_p95": 17571.03333333333,
+  "threshold_file": "threshold.json",
+  "threshold_meta": {
+    "quantile": 0.95,
+    "n_points": 132,
+    "filters": {
+      "use_train_only": true,
+      "use_business_hour_only": false,
+      "use_op_true_only": true
+    },
+    "target_col": "CURVOLTAGE",
+    "threshold": 17571.03333333333
+  }
+}

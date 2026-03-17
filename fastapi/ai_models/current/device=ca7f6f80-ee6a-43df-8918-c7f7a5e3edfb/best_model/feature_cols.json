@@ -1,0 +1,15 @@
+[
+  "LOG_ID",
+  "AVGVOLTAGE",
+  "n_obs",
+  "gap_prev_obs_bins",
+  "hour",
+  "dayofweek",
+  "is_business_hour",
+  "AVGVOLTAGE_diff1",
+  "AVGVOLTAGE_roll2_mean",
+  "AVGVOLTAGE_roll4_mean",
+  "AVGVOLTAGE_lag1",
+  "AVGVOLTAGE_lag2",
+  "AVGVOLTAGE_lag4"
+]
