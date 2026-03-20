@@ -46,7 +46,7 @@ def _to_base_feature_name(feature_name: str) -> str:
 
 def resolve_editable_raw_fields(feature_cols: List[str], raw_columns: List[str]) -> List[str]:
     # 직접 제어 의미가 낮은 식별/시간/타깃성 컬럼은 시뮬 입력에서 제외
-    raw_excludes = {"LOG_ID", "DEVICE_ID", "LOG_DT", "CURVOLTAGE", "OP_STATUS"}
+    raw_excludes = {"LOG_ID", "DEVICE_ID", "LOG_DT", "CURVOLTAGE", "OP_STATUS", "CSUSAGETIME", "MGREFILLTIME"}
     base_feature_names = {_to_base_feature_name(col) for col in feature_cols}
     return [
         col for col in raw_columns
