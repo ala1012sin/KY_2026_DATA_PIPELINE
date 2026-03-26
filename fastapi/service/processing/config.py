@@ -8,6 +8,7 @@ from typing import Optional, Tuple
 # =========================
 @dataclass
 class PreprocessConfig: # 전처리 옵션 설정
+    cutoff_datetime: Optional[str] = None
     time_col_candidates: Tuple[str, ...] = ("LOG_DT", "log_dt", "timestamp", "time", "dt")
     device_col_candidates: Tuple[str, ...] = ("DEVICE_ID", "device_id", "SERIAL_NO", "serial_no", "device", "id")
     # 타깃(전력) 후보
@@ -18,6 +19,7 @@ class PreprocessConfig: # 전처리 옵션 설정
     fill_limit: Optional[int] = None
 
     add_time_features: bool = True
+    add_business_hour_flag: bool = False
         
     #업무시간/평일 피쳐 설정
     business_hour_start: int = 10
@@ -40,10 +42,19 @@ class PreprocessConfig: # 전처리 옵션 설정
     # validation, test 데이터 나누는 비율 
     val_ratio: float = 0.1
     test_ratio: float = 0.2
+    use_date_split: bool = True
+    test_days: int = 3
+    val_days: int = 3
+    min_train_days: int = 5
 
     # 너무 많은 원본 numeric 컬럼이 있으면 폭발하니까 제한 옵션
     # None이면 전부 사용, 숫자면 "타깃 + 상위 N개 numeric"만 사용
     max_base_cols: Optional[int] = None
+
+    add_missing_flags: bool = True
+    base_fill_method_after_fe: str = "ffill"
+    base_fill_limit_after_fe: Optional[int] = 2
+    engineered_fill_value: float = 0.0
 
     out_dir: str = "./out_preprocess"
 

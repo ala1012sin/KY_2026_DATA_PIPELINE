@@ -19,14 +19,18 @@ from db.public.models import TB_PEMS_PRO_LOG
 from setting.database_orm import SessionLocal
 from .config import PreprocessConfig
 from .steps import (
+    add_cumulative_delta_features,
     add_feature_engineering,
     add_gap_features,
+    add_load_factor_feature,
     add_session_features,
     add_splits_per_device,
+    add_splits_per_device_by_days,
     add_targets,
     add_time_features,
     fill_feature_nans_devicewise,
     infer_col,
+    infer_target_col_robust,
     resample_15m_per_device,
 )
 
@@ -124,13 +128,24 @@ def preprocess_raw_df_to_supervised(
     # 필수 핵심 컬럼 추론(시간/장비/타깃)
     time_col = infer_col(raw, pcfg.time_col_candidates, required=True)
     device_col = infer_col(raw, pcfg.device_col_candidates, required=True)
-    target_col = infer_col(raw, pcfg.target_col_candidates, required=True)
+    target_col_raw = infer_target_col_robust(raw, pcfg.target_col_candidates, required=True)
+
+    raw = raw.copy()
+    raw[time_col] = pd.to_datetime(raw[time_col], errors="coerce")
+    raw = raw.dropna(subset=[time_col])
+    if pcfg.cutoff_datetime:
+        raw = raw[raw[time_col] >= pcfg.cutoff_datetime].copy()
+    if raw.empty:
+        raise DataNotFoundError("cutoff 적용 후 사용 가능한 원본 데이터가 없습니다")
 
     # 1) 15분 리샘플 + 관측 개수(n_obs) 생성
     df_15 = resample_15m_per_device(
         raw, time_col, device_col,
         pcfg.resample_rule, pcfg.fill_method, fill_limit=pcfg.fill_limit
     )
+    target_col = infer_target_col_robust(df_15, pcfg.target_col_candidates, required=False)
+    if target_col is None:
+        target_col = target_col_raw if target_col_raw in df_15.columns else infer_target_col_robust(df_15, (target_col_raw,), required=True)
 
     # 2) 관측 간 간격 관련 피처
     df_15 = add_gap_features(df_15, time_col, device_col, rule=pcfg.resample_rule, n_obs_col="n_obs")
@@ -145,7 +160,30 @@ def preprocess_raw_df_to_supervised(
 
     # 5) 시간 피처(요일/업무시간 등)
     if pcfg.add_time_features:
-        df_15 = add_time_features(df_15, time_col, pcfg.business_hour_start, pcfg.business_hour_end)
+        df_15 = add_time_features(
+            df_15,
+            time_col,
+            pcfg.business_hour_start,
+            pcfg.business_hour_end,
+            add_business_hour=pcfg.add_business_hour_flag,
+        )
+
+    if pcfg.use_date_split:
+        df_15 = add_splits_per_device_by_days(
+            df_15,
+            time_col,
+            device_col,
+            test_days=pcfg.test_days,
+            val_days=pcfg.val_days,
+            min_train_days=pcfg.min_train_days,
+            fallback_val_ratio=pcfg.val_ratio,
+            fallback_test_ratio=pcfg.test_ratio,
+        )
+    else:
+        df_15 = add_splits_per_device(df_15, time_col, device_col, pcfg.val_ratio, pcfg.test_ratio)
+
+    df_15 = add_load_factor_feature(df_15, device_col, target_col, split_col="split", q=0.99)
+    df_15 = add_cumulative_delta_features(df_15, device_col, time_col)
 
     # FE 제외 대상(메타/시간 피쳐)
     fe_ban = {
@@ -154,7 +192,18 @@ def preprocess_raw_df_to_supervised(
     }
 
     # 기본 FE 후보: target + 주요 센서 컬럼
-    default_fe = [target_col, "HZ", "AVGVOLTAGE", "AVGCURRENT", "PRESSURE", "TEMPERATURE", "FACTOR"]
+    default_fe = [
+        target_col,
+        "HZ",
+        "AVGVOLTAGE",
+        "AVGCURRENT",
+        "PRESSURE",
+        "TEMPERATURE",
+        "FACTOR",
+        "load_factor",
+        "CSUSAGETIME_DELTA",
+        "MGREFILLTIME_DELTA",
+    ]
     default_fe = [c for c in default_fe if (c in df_15.columns) and (c not in fe_ban)]
 
     # 사용자가 명시한 FE 컬럼 우선
@@ -184,10 +233,23 @@ def preprocess_raw_df_to_supervised(
         session_col="session_id",  #세션 단위로 lag/rolling/diff/pct 생성
     )
 
-    # 7) 타깃/분할/결측 정리
+    # 7) 타깃/결측 정리
     df_sup = add_targets(df_feat, time_col, device_col, target_col, pcfg.horizons_steps)
-    df_sup = add_splits_per_device(df_sup, time_col, device_col, pcfg.val_ratio, pcfg.test_ratio)
-    df_sup = fill_feature_nans_devicewise(df_sup, time_col, device_col)
+    if pcfg.lag_steps:
+        max_lag = max(pcfg.lag_steps)
+        max_lag_col = f"{target_col}_lag{max_lag}"
+        if max_lag_col in df_sup.columns:
+            df_sup = df_sup.dropna(subset=[max_lag_col]).copy()
+
+    df_sup = fill_feature_nans_devicewise(
+        df_sup,
+        time_col,
+        device_col,
+        add_missing_flags=pcfg.add_missing_flags,
+        base_fill_method=pcfg.base_fill_method_after_fe,
+        base_fill_limit=pcfg.base_fill_limit_after_fe,
+        engineered_fill_value=pcfg.engineered_fill_value,
+    )
     if df_sup.empty:
         raise DataNotFoundError("전처리 결과 데이터가 비어 있습니다")
 
@@ -204,6 +266,7 @@ def preprocess_raw_df_to_supervised(
         "out_csv": out_csv,
         "time_col": time_col,
         "device_col": device_col,
+        "target_col_raw": target_col_raw,
         "target_col": target_col,
         "preprocess_config": asdict(pcfg),
         "n_rows": int(len(df_sup)),
@@ -218,6 +281,7 @@ def preprocess_raw_df_to_supervised(
             "out_csv": out_csv,
             "time_col": time_col,
             "device_col": device_col,
+            "target_col_raw": target_col_raw,
             "target_col": target_col,
             "preprocess_config": asdict(pcfg),
             "n_rows": int(len(df_sup)),

@@ -1,4 +1,5 @@
 """Reusable preprocessing step functions."""
+import re
 from typing import List, Optional, Tuple
 
 import numpy as np
@@ -18,6 +19,59 @@ def infer_col(df: pd.DataFrame, candidates: Tuple[str, ...], required=True) -> O
             return c
     if required:
         raise ValueError(f"Required column not found. candidates={candidates}")
+    return None
+
+
+def _norm_col_name(x: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(x).lower())
+
+
+def infer_target_col_robust(df: pd.DataFrame, candidates: Tuple[str, ...], required: bool = True) -> Optional[str]:
+    cols = list(df.columns)
+    if not cols:
+        if required:
+            raise ValueError("No columns in dataframe.")
+        return None
+
+    for c in candidates:
+        if c in cols:
+            return c
+
+    col_norm_map = {c: _norm_col_name(c) for c in cols}
+    inv_norm = {v: k for k, v in col_norm_map.items()}
+    for cand in candidates:
+        cn = _norm_col_name(cand)
+        if cn in inv_norm:
+            return inv_norm[cn]
+
+    cand_norms = [_norm_col_name(c) for c in candidates]
+    for cn in cand_norms:
+        matched = [c for c in cols if cn in col_norm_map[c] or col_norm_map[c] in cn]
+        if matched:
+            numeric_matched = [c for c in matched if pd.api.types.is_numeric_dtype(df[c])]
+            return numeric_matched[0] if numeric_matched else matched[0]
+
+    power_keywords = ("pavg", "power", "curvoltage", "watt", "kw", "mw")
+    numeric_cols = [c for c in cols if pd.api.types.is_numeric_dtype(df[c])]
+    scored = []
+    for c in numeric_cols:
+        nm = col_norm_map[c]
+        score = sum(int(k in nm) for k in power_keywords)
+        scored.append((score, c))
+    scored = sorted(scored, key=lambda x: (-x[0], x[1]))
+    if scored and scored[0][0] > 0:
+        return scored[0][1]
+
+    if numeric_cols:
+        tmp = []
+        for c in numeric_cols:
+            s = pd.to_numeric(df[c], errors="coerce").replace([np.inf, -np.inf], np.nan)
+            tmp.append((int(s.notna().sum()), float(s.std(skipna=True) or 0.0), c))
+        tmp = sorted(tmp, key=lambda x: (-x[0], -x[1], x[2]))
+        return tmp[0][2]
+
+    if required:
+        raise ValueError(f"Target column not found. candidates={candidates}")
     return None
 
 
@@ -41,28 +95,66 @@ def resample_15m_per_device(
     d[time_col] = pd.to_datetime(d[time_col], errors="coerce")
     d = d.dropna(subset=[time_col, device_col]).sort_values([device_col, time_col])
 
+    for c in d.columns:
+        if c in [time_col, device_col]:
+            continue
+        if pd.api.types.is_bool_dtype(d[c]):
+            d[c] = d[c].astype("int8")
+
     num_cols = [c for c in d.columns if c not in [time_col, device_col] and pd.api.types.is_numeric_dtype(d[c])]
     if not num_cols:
         raise ValueError("No numeric columns to resample.")
 
-    g = d.set_index(time_col).groupby(device_col)
+    agg_map = {}
+    for c in num_cols:
+        agg_map[c] = "max" if _is_state_col(c, d[c]) else "mean"
 
-    mean_df = g[num_cols].resample(rule).mean()
-    cnt_df = g.resample(rule).size().rename("n_obs")  # bin별 관측 개수
+    grp = d.groupby(device_col).resample(rule, on=time_col)
+    # pandas 버전에 따라 resample 객체에서 컬럼 서브셋팅이 tuple 처리로 해석될 수 있어
+    # 서브셋팅 없이 agg_map만 직접 전달한다.
+    agg_df = grp.agg(agg_map)
+    cnt_df = grp.size().rename("n_obs")
 
-    out = pd.concat([mean_df, cnt_df], axis=1).reset_index().sort_values([device_col, time_col])
+    out = pd.concat([agg_df, cnt_df], axis=1).reset_index().sort_values([device_col, time_col])
 
     # 공백 유지(추천): fill_method="none"
     if fill_method and str(fill_method).lower() in ("ffill", "bfill"):
-        fill_cols = num_cols  # n_obs는 채우지 않음
-        out[fill_cols] = out.groupby(device_col, group_keys=False)[fill_cols].apply(
-            lambda gg: gg.fillna(method=fill_method, limit=fill_limit)
-        )
+        fill_cols = [c for c in out.columns if c not in [time_col, device_col, "n_obs"]]
+        for c in fill_cols:
+            if str(fill_method).lower() == "ffill":
+                out[c] = out.groupby(device_col)[c].ffill(limit=fill_limit)
+            else:
+                out[c] = out.groupby(device_col)[c].bfill(limit=fill_limit)
 
     return out
 
 
-def add_time_features(df_15: pd.DataFrame, time_col: str, start: int = 10, end: int = 19) -> pd.DataFrame:
+def _is_binary_like_series(s: pd.Series) -> bool:
+    x = pd.to_numeric(s, errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
+    if len(x) == 0:
+        return False
+    vals = set(np.unique(x.to_numpy()))
+    return vals.issubset({0, 1})
+
+
+def _is_state_col(col_name: str, s: pd.Series) -> bool:
+    nm = _norm_col_name(col_name)
+    state_keywords = (
+        "opstatus", "status", "state", "run", "running",
+        "alarm", "fault", "trip", "onoff", "ison", "flag", "enable",
+    )
+    if any(k in nm for k in state_keywords):
+        return True
+    return _is_binary_like_series(s)
+
+
+def add_time_features(
+    df_15: pd.DataFrame,
+    time_col: str,
+    start: int = 10,
+    end: int = 19,
+    add_business_hour: bool = True,
+) -> pd.DataFrame:
     """시간 피쳐 생성
         - 요일/ 시간대 패턴 학습을 위해"""
     d = df_15.copy()
@@ -75,7 +167,8 @@ def add_time_features(df_15: pd.DataFrame, time_col: str, start: int = 10, end: 
     d["is_business_day"] = (d["dayofweek"] < 5).astype(int)
 
     # 업무시간(10~19) 여부
-    d["is_business_hour"] = ((d["hour"] >= start) & (d["hour"] <= end)).astype(int)
+    if add_business_hour:
+        d["is_business_hour"] = ((d["hour"] >= start) & (d["hour"] <= end)).astype(int)
     
     return d
 
@@ -217,6 +310,52 @@ def add_targets(df_feat: pd.DataFrame, time_col: str, device_col: str, target_co
     return d
 
 
+def add_splits_per_device_by_days(
+    df: pd.DataFrame,
+    time_col: str,
+    device_col: str,
+    test_days: int = 3,
+    val_days: int = 1,
+    min_train_days: int = 5,
+    fallback_val_ratio: float = 0.1,
+    fallback_test_ratio: float = 0.2,
+) -> pd.DataFrame:
+    d = df.copy()
+    d[time_col] = pd.to_datetime(d[time_col], errors="coerce")
+    d = d.dropna(subset=[time_col, device_col]).sort_values([device_col, time_col])
+
+    def _fallback_ratio(g: pd.DataFrame) -> pd.DataFrame:
+        g = g.sort_values(time_col).copy()
+        n = len(g)
+        test_start = int((1.0 - fallback_test_ratio) * n)
+        val_start = int((1.0 - fallback_test_ratio - fallback_val_ratio) * n)
+        val_start = max(0, min(val_start, test_start - 1))
+        g["split"] = "train"
+        g.iloc[val_start:test_start, g.columns.get_loc("split")] = "val"
+        g.iloc[test_start:, g.columns.get_loc("split")] = "test"
+        return g
+
+    def _split_one(g: pd.DataFrame) -> pd.DataFrame:
+        g = g.sort_values(time_col).copy()
+        tmax = g[time_col].max()
+        test_start_ts = tmax - pd.Timedelta(days=test_days)
+        val_start_ts = test_start_ts - pd.Timedelta(days=val_days)
+        train_min_ts = val_start_ts - pd.Timedelta(days=min_train_days)
+
+        if g[time_col].min() > train_min_ts:
+            return _fallback_ratio(g)
+
+        g["split"] = "train"
+        g.loc[g[time_col] >= val_start_ts, "split"] = "val"
+        g.loc[g[time_col] >= test_start_ts, "split"] = "test"
+
+        if (g["split"].eq("test").sum() < 5) or (g["split"].eq("val").sum() < 8):
+            return _fallback_ratio(g)
+        return g
+
+    return d.groupby(device_col, group_keys=False).apply(_split_one)
+
+
 def add_splits_per_device(df: pd.DataFrame, time_col: str, device_col: str, val_ratio: float, test_ratio: float) -> pd.DataFrame:
     """장비별 시간 순 정렬 후 test/val/train으로 분할하는 함수
         시계열 데이터의 특성을 고려해 랜덤으로 뽑지 않고 시간순대로 선택"""
@@ -239,7 +378,15 @@ def add_splits_per_device(df: pd.DataFrame, time_col: str, device_col: str, val_
     return d.groupby(device_col, group_keys=False).apply(_split_one)
 
 
-def fill_feature_nans_devicewise(df_sup, time_col, device_col, fill_limit=None):
+def fill_feature_nans_devicewise(
+    df_sup,
+    time_col,
+    device_col,
+    add_missing_flags: bool = True,
+    base_fill_method: str = "ffill",
+    base_fill_limit: Optional[int] = 2,
+    engineered_fill_value: float = 0.0,
+):
     """각 컬럼의 lag/rolling 때문에 생기는 결측을 정리하는 함수"""
     d = df_sup.copy().sort_values([device_col, time_col])
     exclude = {time_col, device_col, "split", "y_15", "y_30"}
@@ -247,10 +394,60 @@ def fill_feature_nans_devicewise(df_sup, time_col, device_col, fill_limit=None):
     if not feat_cols:
         return d
     d[feat_cols] = d[feat_cols].replace([np.inf, -np.inf], np.nan)
-#    d[feat_cols] = d.groupby(device_col, group_keys=False)[feat_cols].apply(
-#        lambda g: g.ffill(limit=fill_limit)
-#    )   주말, 평일 공백이 있다면 유지하기 위해 제외
-    d[feat_cols] = d[feat_cols].fillna(0.0)
+
+    if add_missing_flags:
+        for c in feat_cols:
+            miss = d[c].isna()
+            if miss.any():
+                d[f"{c}_is_missing"] = miss.astype("int8")
+
+    group_cols = [device_col]
+    if "split" in d.columns:
+        group_cols.append("split")
+    if "session_id" in d.columns:
+        group_cols.append("session_id")
+
+    raw_like_cols = [c for c in feat_cols if not any(tok in c for tok in ("_lag", "_roll", "_diff", "_pct"))]
+    if str(base_fill_method).lower() in ("ffill", "bfill"):
+        for c in raw_like_cols:
+            if str(base_fill_method).lower() == "ffill":
+                d[c] = d.groupby(group_cols)[c].ffill(limit=base_fill_limit)
+            else:
+                d[c] = d.groupby(group_cols)[c].bfill(limit=base_fill_limit)
+
+    d[feat_cols] = d[feat_cols].fillna(engineered_fill_value)
+    return d
+
+
+def add_load_factor_feature(
+    df: pd.DataFrame,
+    device_col: str,
+    target_col: str,
+    split_col: str = "split",
+    q: float = 0.99,
+) -> pd.DataFrame:
+    d = df.copy()
+    if split_col in d.columns:
+        train_mask = d[split_col] == "train"
+        p99_series = d[train_mask].groupby(device_col)[target_col].quantile(q)
+    else:
+        p99_series = d.groupby(device_col)[target_col].quantile(q)
+
+    d["target_p99"] = d[device_col].map(p99_series)
+    d["target_p99"] = d["target_p99"].apply(lambda x: np.nan if pd.isna(x) or x < 1.0 else x)
+    d["load_factor"] = (d[target_col] / d["target_p99"]).fillna(0.0)
+    d["load_factor"] = d["load_factor"].replace([np.inf, -np.inf], 0.0).clip(lower=0.0, upper=1.5)
+    d.drop(columns=["target_p99"], inplace=True)
+    return d
+
+
+def add_cumulative_delta_features(df: pd.DataFrame, device_col: str, time_col: str) -> pd.DataFrame:
+    d = df.copy().sort_values([device_col, time_col])
+    for col in ("CSUSAGETIME", "MGREFILLTIME"):
+        if col in d.columns:
+            delta_col = f"{col}_DELTA"
+            d[delta_col] = d.groupby(device_col)[col].diff(1)
+            d[delta_col] = d[delta_col].fillna(0.0).clip(lower=0.0, upper=900.0)
     return d
 
 
