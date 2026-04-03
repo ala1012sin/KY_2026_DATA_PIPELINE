@@ -26,6 +26,11 @@ class TB_CUSTOMER(Base):
     customer_name = Column(Text, name='CUSTOMER_NAME', nullable=True)
     customer_industry = Column(String(50), name='CUSTOMER_INDUSTRY', nullable=True)
     customer_product = Column(String(50), name='CUSTOMER_PRODUCT', nullable=True)
+    customer_auth = Column(Text, name='CUSTOMER_AUTH', nullable=True)
+    customer_phone = Column(Text, name='CUSTOMER_PHONE', nullable=True)
+    customer_email = Column(Text, name='CUSTOMER_EMAIL', nullable=True)
+    customer_password = Column(Text, name='CUSTOMER_PASSWORD', nullable=True)
+    customer_user_id = Column(Text, name='CUSTOMER_USER_ID', nullable=True)
 
     # Relationship (1:N with Device)
     devices = relationship("TB_DEVICE", back_populates="customer")
@@ -41,7 +46,8 @@ class TB_DEVICE(Base):
     device_num = Column(String(50), name='DEVICE_NUM', nullable=True)
     cs_set_time = Column(DateTime, name='CS_SET_TIME', nullable=True)
     mg_refill_set_time = Column(DateTime, name='MG_REFILL_SET_TIME', nullable=True)
-    op_status = Column(Boolean, name='OP_STATUS', nullable=True, comment='0 : 정지, 1 : 운전')
+    horse_power = Column(Integer, name='HORSE_POWER', nullable=True)
+    data_type = Column(Integer, name='DATA_TYPE', nullable=True)
 
     # Relationships
     customer = relationship("TB_CUSTOMER", back_populates="devices")

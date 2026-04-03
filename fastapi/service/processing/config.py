@@ -25,16 +25,31 @@ class PreprocessConfig: # 전처리 옵션 설정
     business_hour_start: int = 10
     business_hour_end: int = 19
         
-    fe_cols: Optional[Tuple[str, ...]] = None
+    # 시뮬레이터 기본: 학습 파이프라인에서 지정한 입력 컬럼을 우선 사용
+    fe_cols: Optional[Tuple[str, ...]] = (
+        "HZ",
+        "AVGVOLTAGE",
+        "AVGCURRENT",
+        "load_factor",
+        "CSUSAGETIME_DELTA",
+        "MGREFILLTIME_DELTA",
+        "PRESSURE",
+        "TEMPERATURE",
+        "FACTOR",
+        "AVG_VOLTAGE",
+        "AVG_CURRENT",
+        "CUR_VOLTAGE",
+    )
 
     # rolling std 생성 여부 (피쳐 폭발/노이즈 방지용)
     add_roll_std: bool = False
 
     # feature engineering
-    lag_steps: Tuple[int, ...] = (1, 2, 4, 8)     # 15/30/60/120
-    roll_windows: Tuple[int, ...] = (2, 4, 8)     # 30/60/120
-    diff_steps: Tuple[int, ...] = (1, 2)
-    add_pct_change: bool = True # 변화율 피쳐 생성 여부 
+    # 시뮬레이터용 기본값: 과거 시점 의존 피쳐 제거
+    lag_steps: Tuple[int, ...] = ()
+    roll_windows: Tuple[int, ...] = ()
+    diff_steps: Tuple[int, ...] = ()
+    add_pct_change: bool = False # 변화율 피쳐 생성 여부
     pct_eps: float = 1e-6 # 0 나눗셈 방지 용 
 
     horizons_steps: Tuple[int, int] = (1, 2)      # y_15, y_30

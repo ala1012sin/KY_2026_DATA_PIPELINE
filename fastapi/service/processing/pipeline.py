@@ -84,6 +84,10 @@ def fetch_pems_pro_log_df(
                 "AVGVOLTAGE": row.avg_voltage,
                 "AVGCURRENT": row.avg_current,
                 "CURVOLTAGE": row.cur_voltage,
+                # 학습 코드에서 underscore 컬럼명을 사용한 모델과 서빙 컬럼명을 맞춘다.
+                "AVG_VOLTAGE": row.avg_voltage,
+                "AVG_CURRENT": row.avg_current,
+                "CUR_VOLTAGE": row.cur_voltage,
                 "FACTOR": row.factor,
                 "OP_TIME": row.op_time,
                 "CSUSAGETIME": row.cs_usage_time,
@@ -92,6 +96,10 @@ def fetch_pems_pro_log_df(
             for row in rows
         ]
         return pd.DataFrame.from_records(records)
+    except Exception:
+        if session is not None:
+            session.rollback()
+        raise
     finally:
         if should_close and session is not None:
             session.close()
@@ -230,11 +238,20 @@ def preprocess_raw_df_to_supervised(
         add_pct_change=pcfg.add_pct_change,
         pct_eps=pcfg.pct_eps,
         add_roll_std=pcfg.add_roll_std,
-        session_col="session_id",  #세션 단위로 lag/rolling/diff/pct 생성
+        session_col="session_id",  # 세션 단위로 lag/rolling/diff/pct 생성
+        split_col="split",
     )
 
     # 7) 타깃/결측 정리
-    df_sup = add_targets(df_feat, time_col, device_col, target_col, pcfg.horizons_steps)
+    df_sup = add_targets(
+        df_feat,
+        time_col,
+        device_col,
+        target_col,
+        pcfg.horizons_steps,
+        session_col="session_id",
+        split_col="split",
+    )
     if pcfg.lag_steps:
         max_lag = max(pcfg.lag_steps)
         max_lag_col = f"{target_col}_lag{max_lag}"

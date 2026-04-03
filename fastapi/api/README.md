@@ -17,17 +17,13 @@ FastAPI 기반 시뮬레이션/최적화 API 요약 문서입니다.
 
 ### GET `/api/simulate/devices`
 - 목적: 시뮬레이션 가능한 장비 목록 조회
-- Query
-  - `exclude_warned` (bool, optional, default=`false`): 경고 장비 제외 여부
 - Response (요약)
   - `total`: 장비 개수
   - `devices`: 장비 ID 목록
-  - `exclude_warned`: 요청 옵션 반영값
-  - `excluded_warned_count`: 제외된 경고 장비 수
 
 예시:
 ```bash
-curl "http://localhost:8000/api/simulate/devices?exclude_warned=true"
+curl "http://localhost:8000/api/simulate/devices"
 ```
 
 ---
@@ -42,8 +38,6 @@ curl "http://localhost:8000/api/simulate/devices?exclude_warned=true"
   - `device_id`, `base_timestamp`, `base_log_id`
   - `editable_fields`: 변경 가능한 raw 입력 컬럼
   - `baseline`: 기준 예측 결과
-  - `error_rates`: 오차 관련 정보
-  - `simulation_notice`: 안내 메시지
 
 예시:
 ```bash
@@ -64,7 +58,6 @@ curl "http://localhost:8000/api/simulate/template/{device_id}?lookback_hours=24"
   - `baseline`: 기준 예측
   - `simulated`: 시뮬레이션 예측
   - `delta`: 기준 대비 변화량/변화율
-  - `error_rates`, `simulation_notice`
 
 예시:
 ```bash
@@ -115,14 +108,14 @@ curl -X POST "http://localhost:8000/api/optimize/milp-test" \
 ---
 
 ### POST `/api/optimize/peak-dispatch-test`
-- 목적: 장비 간 부하 분배로 15/30분 피크를 낮추는 MILP 실행
-- Request Body
+목적: 회사별 장비 부하 분배로 15/30분 피크를 낮추는 MILP 실행
+
+Request Body
   - `lookback_hours` (int, default=`24`)
-  - `top_k` (int, default=`2`)
+  - `customer_name` (string, optional)
   - `idle_op_status_threshold` (float, default=`0.05`)
-  - `force_exceed_demo` (bool, default=`false`)
-  - `force_exceed_margin_ratio` (float, default=`0.05`)
-- Response (요약)
+
+Response (요약)
   - 피크 전/후: `peak_15_before/after`, `peak_30_before/after`
   - 장비 그룹: `donor_device_ids`, `idle_device_ids`, `skipped_devices`
   - 분배 결과: `allocation_plan`, `devices`(장비별 shift/slack 포함)
@@ -134,10 +127,8 @@ curl -X POST "http://localhost:8000/api/optimize/peak-dispatch-test" \
   -H "Content-Type: application/json" \
   -d '{
     "lookback_hours": 24,
-    "top_k": 2,
-    "idle_op_status_threshold": 0.05,
-    "force_exceed_demo": false,
-    "force_exceed_margin_ratio": 0.05
+    "customer_name": "우일금속(주)",
+    "idle_op_status_threshold": 0.05
   }'
 ```
 

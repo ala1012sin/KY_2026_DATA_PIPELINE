@@ -11,7 +11,12 @@ import pandas as pd
 from scipy.optimize import Bounds, LinearConstraint, milp
 
 from Logger import Logger as logger
-from db.public.models import TB_PEAK_DISPATCH_DEVICE_RESULT, TB_PEAK_DISPATCH_RUN
+from db.public.models import (
+    TB_CUSTOMER,
+    TB_DEVICE,
+    TB_PEAK_DISPATCH_DEVICE_RESULT,
+    TB_PEAK_DISPATCH_RUN,
+)
 from infrastructure.queryFactory.base_orm import BaseQueryFactory
 from setting.database_orm import db_connection_pool
 from service.prediction_service import (
@@ -162,6 +167,113 @@ def _format_kw_from_w(value_w: float) -> str:
     return f"{(float(value_w) / 1000.0):.2f}"
 
 
+def _format_pct(value: float) -> str:
+    return f"{float(value):.1f}"
+
+
+def _load_device_company_map(device_ids: List[str]) -> Dict[str, Dict[str, str]]:
+    """DEVICE_ID -> 회사/장비 정보(customer_id/customer_name/data_type/device_type)를 조회한다."""
+    if not device_ids:
+        return {}
+
+    db_gen = db_connection_pool()
+    db = next(db_gen)
+    try:
+        rows = (
+            db.query(
+                TB_DEVICE.device_id,
+                TB_DEVICE.customer_id,
+                TB_CUSTOMER.customer_name,
+                TB_DEVICE.data_type,
+                TB_DEVICE.device_type,
+            )
+            .outerjoin(TB_CUSTOMER, TB_CUSTOMER.customer_id == TB_DEVICE.customer_id)
+            .filter(TB_DEVICE.device_id.in_(device_ids))
+            .all()
+        )
+
+        out: Dict[str, Dict[str, str]] = {}
+        for device_id, customer_id, customer_name, data_type, device_type in rows:
+            dev = str(device_id)
+            cid = str(customer_id) if customer_id is not None else "UNASSIGNED"
+            cname = str(customer_name) if customer_name else cid
+            dtype_num = None
+            if data_type is not None:
+                try:
+                    dtype_num = int(data_type)
+                except Exception:
+                    dtype_num = None
+
+            dtype = str(device_type) if device_type else ""
+            upper_type = dtype.upper()
+            drive_mode = "UNKNOWN"
+
+            # 우선순위: TB_DEVICE.DATA_TYPE (1=VSD, 0=On/Off)
+            if dtype_num == 1:
+                drive_mode = "VSD"
+            elif dtype_num == 0:
+                drive_mode = "ON_OFF"
+            elif "VSD" in upper_type:
+                drive_mode = "VSD"
+            elif "FSD" in upper_type:
+                drive_mode = "ON_OFF"
+
+            out[dev] = {
+                "customer_id": cid,
+                "company_name": cname,
+                "data_type": dtype_num,
+                "device_type": dtype,
+                "drive_mode": drive_mode,
+            }
+        return out
+    finally:
+        try:
+            next(db_gen)
+        except StopIteration:
+            pass
+
+
+def _build_single_device_fsd_text(device_row: Dict[str, Any]) -> str:
+    """단일 장비 회사에서 사용할 감산 권고 문구를 생성한다."""
+    recs: List[str] = []
+    drive_mode = str(device_row.get("drive_mode") or "UNKNOWN").upper()
+    horizons = [
+        (15, float(device_row.get("baseline_15", 0.0)), float(device_row.get("threshold", 0.0)), float(device_row.get("required_shift_15", 0.0))),
+        (30, float(device_row.get("baseline_30", 0.0)), float(device_row.get("threshold", 0.0)), float(device_row.get("required_shift_30", 0.0))),
+    ]
+
+    for minute, base, threshold, required_shift in horizons:
+        if base <= 0 or required_shift <= 1e-9 or base <= threshold:
+            continue
+        if drive_mode == "VSD":
+            reduction_ratio = 20.0
+            keep_ratio = max(0.0, 100.0 - reduction_ratio)
+            recs.append(
+                f"{minute}분 후 예측이 임계치를 {_format_kw_from_w(base - threshold)}kW 초과합니다. "
+                f"VSD 장비 기준으로 부하율을 약 {_format_pct(reduction_ratio)}% 낮춰 {_format_pct(keep_ratio)}% 수준으로 운전하면 피크 완화가 가능합니다."
+            )
+            continue
+
+        if drive_mode == "ON_OFF":
+            recs.append(
+                f"{minute}분 후 예측이 임계치를 {_format_kw_from_w(base - threshold)}kW 초과합니다. "
+                "On/Off 장비(DATA_TYPE=0)는 비율 제어가 어려워 부분 부하 제어 대신 일시 정지/교대 운전을 권고합니다."
+            )
+            continue
+
+        # 구동 타입 정보가 없을 때는 필요 감산 비율을 참고치로 안내한다.
+        reduction_ratio = min(100.0, max(0.0, (required_shift / base) * 100.0))
+        keep_ratio = max(0.0, 100.0 - reduction_ratio)
+        recs.append(
+            f"{minute}분 후 예측이 임계치를 {_format_kw_from_w(base - threshold)}kW 초과합니다. "
+            f"구동 타입 확인 후 부하율을 약 {_format_pct(reduction_ratio)}% 낮춰 {_format_pct(keep_ratio)}% 수준으로 운전하면 피크 완화가 가능합니다."
+        )
+
+    if not recs:
+        return "현재 조건에서는 임계치 초과가 없어 추가 부하 제어 권고가 없습니다."
+    return "\n".join(recs)
+
+
 def _predict_devices_batched(
     device_ids: List[str],
     lookback_hours: int,
@@ -260,10 +372,10 @@ def _save_peak_dispatch_result(result_payload: Dict[str, Any], customer_id: Opti
             success=bool(result_payload.get("success", False)),
             message=result_payload.get("message"),
             lookback_hours=int(result_payload.get("lookback_hours", 0)),
-            top_k=int(result_payload.get("top_k", 0)),
+            top_k=int(len(result_payload.get("donor_device_ids") or [])),
             idle_op_status_threshold=float(result_payload.get("idle_op_status_threshold", 0.0)),
-            force_exceed_demo=bool(result_payload.get("force_exceed_demo", False)),
-            force_exceed_margin_ratio=float(result_payload.get("force_exceed_margin_ratio", 0.05)),
+            force_exceed_demo=False,
+            force_exceed_margin_ratio=0.0,
             device_count=int(result_payload.get("device_count", 0)),
             peak_15_before=float(result_payload.get("peak_15_before", 0.0)),
             peak_15_after=float(result_payload.get("peak_15_after", 0.0)),
@@ -313,90 +425,21 @@ def _save_peak_dispatch_result(result_payload: Dict[str, Any], customer_id: Opti
             pass
 
 
-def optimize_peak_dispatch_test(
-    lookback_hours: int = 24,
-    top_k: int = 2,
-    idle_op_status_threshold: float = 0.05,
-    force_exceed_demo: bool = False,
-    force_exceed_margin_ratio: float = 0.05,
+def _optimize_company_group(
+    records: List[Dict[str, Any]],
+    lookback_hours: int,
+    idle_op_status_threshold: float,
 ) -> Dict[str, Any]:
-    """전체 장비를 하나의 회사로 보고 상위 사용량 장비 부하를 분배해 피크를 낮춘다."""
-    total_start = time.perf_counter()
-
-    if lookback_hours <= 0:
-        raise ValueError("lookback_hours는 1 이상이어야 합니다")
-    if top_k <= 0:
-        raise ValueError("top_k는 1 이상이어야 합니다")
-    if idle_op_status_threshold < 0 or idle_op_status_threshold > 1:
-        raise ValueError("idle_op_status_threshold는 0~1 범위여야 합니다")
-    if force_exceed_margin_ratio <= 0 or force_exceed_margin_ratio >= 1:
-        raise ValueError("force_exceed_margin_ratio는 0~1 범위(양 끝 제외)여야 합니다")
-
-    device_ids = list_model_device_ids(exclude_warned=False)
-    if not device_ids:
-        raise ValueError("모델 장비가 없습니다")
-
-    records: List[Dict[str, Any]] = []
-    skipped: List[Dict[str, str]] = []
-
-    threshold_start = time.perf_counter()
-    threshold_map: Dict[str, float] = {}
-    for device_id in device_ids:
-        threshold = _load_device_threshold(device_id)
-        if threshold is None:
-            skipped.append({"device_id": device_id, "reason": "threshold 없음"})
-            continue
-        threshold_map[device_id] = float(threshold)
-    logger.info(
-        f"[MILP] threshold stage done: eligible={len(threshold_map)}, skipped={len(skipped)}, "
-        f"elapsed={time.perf_counter() - threshold_start:.2f}s"
-    )
-
-    predict_start = time.perf_counter()
-    pred_map: Dict[str, Dict[str, Any]] = {}
-    pred_failed: Dict[str, str] = {}
-    try:
-        pred_map, pred_failed = _predict_devices_batched(
-            device_ids=list(threshold_map.keys()),
-            lookback_hours=lookback_hours,
-        )
-    except Exception as e:
-        logger.warning(f"[MILP] batch prediction failed: {e}")
-
-    for device_id, threshold in threshold_map.items():
-        if device_id in pred_failed:
-            skipped.append({"device_id": device_id, "reason": f"예측 실패: {pred_failed[device_id]}"})
-            continue
-
-        pred = pred_map.get(device_id)
-        if pred is None:
-            skipped.append({"device_id": device_id, "reason": "예측 결과 없음"})
-            continue
-
-        try:
-            first = (pred.get("preds") or [{}])[0]
-            p15 = float(first.get("y_15_pred", 0.0))
-            p30 = float(first.get("y_30_pred", 0.0))
-        except Exception as e:
-            skipped.append({"device_id": device_id, "reason": f"예측 파싱 실패: {e}"})
-            continue
-
-        records.append(
-            {
-                "device_id": device_id,
-                "threshold": float(threshold),
-                "p15": p15,
-                "p30": p30,
-            }
-        )
-
-    logger.info(
-        f"[MILP] prediction stage done: records={len(records)}, "
-        f"elapsed={time.perf_counter() - predict_start:.2f}s"
-    )
-
-    if len(records) < 3:
-        raise ValueError("최적화 가능한 장비가 3대 미만입니다")
+    """회사(고객) 단위로 피크 분배를 수행한다. 단일 장비면 FSD 감산 권고로 대체한다."""
+    if not records:
+        return {
+            "devices": [],
+            "allocation_plan": [],
+            "donor_device_ids": [],
+            "idle_device_ids": [],
+            "objective_peak_sum": 0.0,
+            "total_slack": 0.0,
+        }
 
     op_mean_map = _mean_op_status_by_device([r["device_id"] for r in records], lookback_hours=lookback_hours)
     for row in records:
@@ -404,36 +447,71 @@ def optimize_peak_dispatch_test(
         row["op_status_mean"] = op_mean
         row["is_idle"] = op_mean <= idle_op_status_threshold
 
+    # 단일 장비 회사: 타 장비 분배 대신 FSD 감산 권고를 생성
+    if len(records) == 1:
+        row = records[0]
+        base15 = float(row["p15"])
+        base30 = float(row["p30"])
+        threshold = float(row["threshold"])
+        required15 = max(0.0, base15 - threshold)
+        required30 = max(0.0, base30 - threshold)
+
+        device_out = {
+            "device_id": row["device_id"],
+            "company_name": row.get("company_name"),
+            "customer_id": row.get("customer_id"),
+            "drive_mode": row.get("drive_mode"),
+            "is_donor": True,
+            "is_idle": bool(row["is_idle"]),
+            "op_status_mean": float(row["op_status_mean"]),
+            "threshold": threshold,
+            "baseline_15": base15,
+            "baseline_30": base30,
+            "optimized_15": base15 - required15,
+            "optimized_30": base30 - required30,
+            "delta_15": -required15,
+            "delta_30": -required30,
+            "shift_in_15": 0.0,
+            "shift_in_30": 0.0,
+            "shift_out_15": required15,
+            "shift_out_30": required30,
+            "required_shift_15": required15,
+            "required_shift_30": required30,
+            "distributed_targets_15": [],
+            "distributed_targets_30": [],
+            "distribution_text": None,
+            "slack_15": 0.0,
+            "slack_30": 0.0,
+        }
+        device_out["distribution_text"] = _build_single_device_fsd_text(device_out)
+
+        objective = float(device_out["optimized_15"] + device_out["optimized_30"])
+        return {
+            "devices": [device_out],
+            "allocation_plan": [],
+            "donor_device_ids": [row["device_id"]],
+            "idle_device_ids": ([row["device_id"]] if row["is_idle"] else []),
+            "objective_peak_sum": objective,
+            "total_slack": 0.0,
+        }
+
     donor_candidates = [row for row in records if not row["is_idle"]]
     if not donor_candidates:
         donor_candidates = records.copy()
 
     donor_candidates.sort(key=lambda r: max(r["p15"], r["p30"]), reverse=True)
     max_donor_count = max(1, min(len(donor_candidates), len(records) - 1))
-    effective_top_k = min(top_k, max_donor_count)
-    donor_ids = [row["device_id"] for row in donor_candidates[:effective_top_k]]
-
-    if force_exceed_demo:
-        for row in records:
-            if row["device_id"] not in donor_ids:
-                continue
-            base_peak = max(float(row["p15"]), float(row["p30"]))
-            forced_threshold = base_peak * (1.0 - float(force_exceed_margin_ratio))
-            row["threshold"] = min(float(row["threshold"]), forced_threshold)
+    donor_ids = [row["device_id"] for row in donor_candidates[:max_donor_count]]
 
     for row in records:
         row["is_donor"] = row["device_id"] in donor_ids
 
     n = len(records)
-    horizons = [15, 30]
-    h_count = len(horizons)
+    h_count = 2
 
-    # idle 장비 인덱스(이진변수 y를 둘 장비) 추출
     idle_indices = [i for i, row in enumerate(records) if row["is_idle"]]
     idle_pos = {idx: pos for pos, idx in enumerate(idle_indices)}
 
-    # 결정변수 벡터를 1차원으로 평탄화해서 구성:
-    # [u(i,h), v(i,h), s(i,h), z(h), y(i)]
     u_base = 0
     v_base = u_base + n * h_count
     s_base = v_base + n * h_count
@@ -460,10 +538,6 @@ def optimize_peak_dispatch_test(
     th = np.array([row["threshold"] for row in records], dtype=float)
     is_donor = np.array([bool(row["is_donor"]) for row in records], dtype=bool)
 
-    # 목적함수 계수:
-    # - z: 전체 피크 최소화
-    # - s: 임계치 초과(slack) 강한 패널티
-    # - y/u(idle): idle 장비 사용 최소화
     c = np.zeros(var_count, dtype=float)
     w_peak = 1.0
     w_slack = 1000.0
@@ -496,10 +570,8 @@ def optimize_peak_dispatch_test(
     for i in idle_indices:
         ub[y_idx(i)] = 1.0
 
-    # 선형 제약식 리스트
     constraints: List[LinearConstraint] = []
 
-    # (1) 수급 균형: 시점별 총 유입(u) == 총 유출(v)
     for h in range(h_count):
         row = np.zeros(var_count, dtype=float)
         for i in range(n):
@@ -509,18 +581,12 @@ def optimize_peak_dispatch_test(
 
     for i in range(n):
         for h in range(h_count):
-            # (2) 임계치 제약 완화:
-            # p - v + u <= threshold + slack
             row_threshold = np.zeros(var_count, dtype=float)
             row_threshold[u_idx(i, h)] = 1.0
             row_threshold[v_idx(i, h)] = -1.0
             row_threshold[s_idx(i, h)] = -1.0
-            constraints.append(
-                LinearConstraint(row_threshold.reshape(1, -1), -np.inf, np.array([th[i] - p[i, h]]))
-            )
+            constraints.append(LinearConstraint(row_threshold.reshape(1, -1), -np.inf, np.array([th[i] - p[i, h]])))
 
-            # (3) 피크 상한 제약:
-            # p - v + u <= z_h
             row_peak = np.zeros(var_count, dtype=float)
             row_peak[u_idx(i, h)] = 1.0
             row_peak[v_idx(i, h)] = -1.0
@@ -528,8 +594,6 @@ def optimize_peak_dispatch_test(
             constraints.append(LinearConstraint(row_peak.reshape(1, -1), -np.inf, np.array([-p[i, h]])))
 
             if is_donor[i]:
-                # (4) donor 유출 한계:
-                # donor는 자기 초과 필요량(exceed_need)을 넘겨서 내보내지 않음
                 exceed_need = max(0.0, p[i, h] - th[i])
                 row_donor_cap = np.zeros(var_count, dtype=float)
                 row_donor_cap[v_idx(i, h)] = 1.0
@@ -537,8 +601,6 @@ def optimize_peak_dispatch_test(
 
     for i in idle_indices:
         for h in range(h_count):
-            # (5) idle 활성 연계(big-M):
-            # y_i=0이면 u(i,h)=0, y_i=1일 때만 유입 허용
             headroom = max(0.0, th[i] - p[i, h])
             donor_over = sum(max(0.0, p[j, h] - th[j]) for j in range(n) if is_donor[j])
             m_value = headroom + donor_over + 1.0
@@ -551,7 +613,6 @@ def optimize_peak_dispatch_test(
     for i in idle_indices:
         integrality[y_idx(i)] = 1
 
-    milp_start = time.perf_counter()
     result = milp(
         c=c,
         constraints=constraints,
@@ -559,13 +620,10 @@ def optimize_peak_dispatch_test(
         bounds=Bounds(lb=lb, ub=ub),
         options={"disp": False},
     )
-    logger.info(f"[MILP] solve stage done: elapsed={time.perf_counter() - milp_start:.2f}s")
-
     solution = np.asarray(result.x if result.x is not None else np.zeros(var_count), dtype=float)
 
     devices_out: List[Dict[str, Any]] = []
     total_slack = 0.0
-
     for i, row in enumerate(records):
         u15, u30 = solution[u_idx(i, 0)], solution[u_idx(i, 1)]
         v15, v30 = solution[v_idx(i, 0)], solution[v_idx(i, 1)]
@@ -579,6 +637,8 @@ def optimize_peak_dispatch_test(
         devices_out.append(
             {
                 "device_id": row["device_id"],
+                "company_name": row.get("company_name"),
+                "customer_id": row.get("customer_id"),
                 "is_donor": bool(row["is_donor"]),
                 "is_idle": bool(row["is_idle"]),
                 "op_status_mean": float(row["op_status_mean"]),
@@ -661,32 +721,183 @@ def optimize_peak_dispatch_test(
         else:
             item["distribution_text"] = "분배원 장비가 아니므로 추천 분배 문구 대상이 아닙니다."
 
-    peak_15_before = float(np.max(p[:, 0]))
-    peak_30_before = float(np.max(p[:, 1]))
+    return {
+        "devices": devices_out,
+        "allocation_plan": allocation_plan,
+        "donor_device_ids": donor_ids,
+        "idle_device_ids": [row["device_id"] for row in records if row["is_idle"]],
+        "objective_peak_sum": float(solution[z_idx(0)] + solution[z_idx(1)]),
+        "total_slack": float(total_slack),
+    }
+
+
+def optimize_peak_dispatch_test(
+    lookback_hours: int = 24,
+    customer_name: Optional[str] = None,
+    idle_op_status_threshold: float = 0.05,
+) -> Dict[str, Any]:
+    """회사별로 장비를 나눠 피크 분배를 수행한다(단일 장비 회사는 FSD 감산 권고)."""
+    total_start = time.perf_counter()
+
+    if lookback_hours <= 0:
+        raise ValueError("lookback_hours는 1 이상이어야 합니다")
+    if idle_op_status_threshold < 0 or idle_op_status_threshold > 1:
+        raise ValueError("idle_op_status_threshold는 0~1 범위여야 합니다")
+
+    device_ids = list_model_device_ids()
+    if not device_ids:
+        raise ValueError("모델 장비가 없습니다")
+
+    records: List[Dict[str, Any]] = []
+    skipped: List[Dict[str, str]] = []
+
+    threshold_start = time.perf_counter()
+    threshold_map: Dict[str, float] = {}
+    for device_id in device_ids:
+        threshold = _load_device_threshold(device_id)
+        if threshold is None:
+            skipped.append({"device_id": device_id, "reason": "threshold 없음"})
+            continue
+        threshold_map[device_id] = float(threshold)
+    logger.info(
+        f"[MILP] threshold stage done: eligible={len(threshold_map)}, skipped={len(skipped)}, "
+        f"elapsed={time.perf_counter() - threshold_start:.2f}s"
+    )
+
+    predict_start = time.perf_counter()
+    pred_map: Dict[str, Dict[str, Any]] = {}
+    pred_failed: Dict[str, str] = {}
+    try:
+        pred_map, pred_failed = _predict_devices_batched(
+            device_ids=list(threshold_map.keys()),
+            lookback_hours=lookback_hours,
+        )
+    except Exception as e:
+        logger.warning(f"[MILP] batch prediction failed: {e}")
+
+    company_map = _load_device_company_map(list(threshold_map.keys()))
+
+    for device_id, threshold in threshold_map.items():
+        if device_id in pred_failed:
+            skipped.append({"device_id": device_id, "reason": f"예측 실패: {pred_failed[device_id]}"})
+            continue
+
+        pred = pred_map.get(device_id)
+        if pred is None:
+            skipped.append({"device_id": device_id, "reason": "예측 결과 없음"})
+            continue
+
+        try:
+            first = (pred.get("preds") or [{}])[0]
+            p15 = float(first.get("y_15_pred", 0.0))
+            p30 = float(first.get("y_30_pred", 0.0))
+        except Exception as e:
+            skipped.append({"device_id": device_id, "reason": f"예측 파싱 실패: {e}"})
+            continue
+
+        company_info = company_map.get(device_id, {"customer_id": "UNASSIGNED", "company_name": "미지정 회사"})
+        records.append(
+            {
+                "device_id": device_id,
+                "customer_id": company_info.get("customer_id"),
+                "company_name": company_info.get("company_name"),
+                "drive_mode": company_info.get("drive_mode", "UNKNOWN"),
+                "threshold": float(threshold),
+                "p15": p15,
+                "p30": p30,
+            }
+        )
+
+    logger.info(
+        f"[MILP] prediction stage done: records={len(records)}, "
+        f"elapsed={time.perf_counter() - predict_start:.2f}s"
+    )
+
+    selected_customer_name = (customer_name or "").strip()
+    if selected_customer_name:
+        normalized_target = selected_customer_name.casefold()
+        records = [
+            r for r in records
+            if str(r.get("company_name") or "").strip().casefold() == normalized_target
+        ]
+        if not records:
+            raise ValueError(f"입력한 CUSTOMER_NAME에 해당하는 장비를 찾을 수 없습니다: {selected_customer_name}")
+
+    if len(records) < 1:
+        raise ValueError("최적화 가능한 장비가 없습니다")
+
+    grouped: Dict[str, List[Dict[str, Any]]] = {}
+    for row in records:
+        key = str(row.get("customer_id") or "UNASSIGNED")
+        grouped.setdefault(key, []).append(row)
+
+    devices_out: List[Dict[str, Any]] = []
+    allocation_plan: List[Dict[str, Any]] = []
+    donor_device_ids: List[str] = []
+    idle_device_ids: List[str] = []
+    total_slack = 0.0
+    objective_peak_sum = 0.0
+
+    company_summaries: List[Dict[str, Any]] = []
+    for customer_id, rows in grouped.items():
+        company_name = rows[0].get("company_name") or customer_id
+        group_result = _optimize_company_group(
+            records=[dict(r) for r in rows],
+            lookback_hours=lookback_hours,
+            idle_op_status_threshold=idle_op_status_threshold,
+        )
+
+        for d in group_result["devices"]:
+            d["customer_id"] = customer_id
+            d["company_name"] = company_name
+        for a in group_result["allocation_plan"]:
+            a["customer_id"] = customer_id
+            a["company_name"] = company_name
+
+        devices_out.extend(group_result["devices"])
+        allocation_plan.extend(group_result["allocation_plan"])
+        donor_device_ids.extend(group_result["donor_device_ids"])
+        idle_device_ids.extend(group_result["idle_device_ids"])
+        total_slack += float(group_result["total_slack"])
+        objective_peak_sum += float(group_result["objective_peak_sum"])
+
+        company_summaries.append(
+            {
+                "customer_id": customer_id,
+                "company_name": company_name,
+                "device_count": len(rows),
+                "donor_device_ids": group_result["donor_device_ids"],
+            }
+        )
+
+    peak_15_before = float(max(d["baseline_15"] for d in devices_out))
+    peak_30_before = float(max(d["baseline_30"] for d in devices_out))
     peak_15_after = float(max(d["optimized_15"] for d in devices_out))
     peak_30_after = float(max(d["optimized_30"] for d in devices_out))
 
     result_payload = {
-        "status": "optimal" if bool(result.success) else "failed",
-        "success": bool(result.success),
-        "message": str(result.message),
+        "status": "optimal",
+        "success": True,
+        "message": (
+            f"회사별 최적화 완료({len(company_summaries)}개 회사)"
+            if not selected_customer_name
+            else f"{selected_customer_name} 회사 최적화 완료"
+        ),
         "lookback_hours": int(lookback_hours),
-        "top_k": int(effective_top_k),
         "idle_op_status_threshold": float(idle_op_status_threshold),
-        "force_exceed_demo": bool(force_exceed_demo),
-        "force_exceed_margin_ratio": float(force_exceed_margin_ratio),
         "device_count": len(records),
-        "donor_device_ids": donor_ids,
-        "idle_device_ids": [row["device_id"] for row in records if row["is_idle"]],
+        "donor_device_ids": sorted(set(donor_device_ids)),
+        "idle_device_ids": sorted(set(idle_device_ids)),
         "peak_15_before": peak_15_before,
         "peak_15_after": peak_15_after,
         "peak_30_before": peak_30_before,
         "peak_30_after": peak_30_after,
-        "objective_peak_sum": float(solution[z_idx(0)] + solution[z_idx(1)]),
+        "objective_peak_sum": float(objective_peak_sum),
         "total_slack": float(total_slack),
         "allocation_plan": allocation_plan,
         "devices": devices_out,
         "skipped_devices": skipped,
+        "company_summaries": company_summaries,
     }
 
     # 회사 매핑 정보가 아직 없더라도 실행/결과는 항상 저장한다.

@@ -56,23 +56,12 @@
         <input id="lookback" type="number" value="24" min="1" />
       </div>
       <div class="field">
-        <label>상위 부하 장비 수(top_k)</label>
-        <input id="topk" type="number" value="2" min="1" />
+        <label>회사명(CUSTOMER_NAME)</label>
+        <input id="customerName" type="text" placeholder="예: ABC컴퍼니" />
       </div>
       <div class="field">
         <label>미가동 기준(OP_STATUS 평균 이하)</label>
         <input id="idleThreshold" type="number" value="0.05" min="0" max="1" step="0.01" />
-      </div>
-      <div class="field">
-        <label>강제 초과 비율(테스트)</label>
-        <input id="forceMargin" type="number" value="0.05" min="0.01" max="0.5" step="0.01" />
-      </div>
-      <div class="field" style="min-width: 200px;">
-        <label>&nbsp;</label>
-        <label style="display:flex; align-items:center; gap:8px; margin:0; font-size:13px; color:#374151; height:38px;">
-          <input id="forceExceed" type="checkbox" />
-          임계치 초과 테스트 모드
-        </label>
       </div>
       <div class="field" style="min-width: 160px;">
         <label>&nbsp;</label>
@@ -117,10 +106,8 @@
 
   <script>
     const lookbackEl = document.getElementById('lookback');
-    const topkEl = document.getElementById('topk');
+    const customerNameEl = document.getElementById('customerName');
     const idleThresholdEl = document.getElementById('idleThreshold');
-    const forceExceedEl = document.getElementById('forceExceed');
-    const forceMarginEl = document.getElementById('forceMargin');
     const btnRun = document.getElementById('btnRun');
     const statusTextEl = document.getElementById('statusText');
     const summaryGridEl = document.getElementById('summaryGrid');
@@ -317,6 +304,18 @@
         titleEl.textContent = donor.device_id;
         const recs = [];
 
+        // 백엔드가 만든 권고문을 우선 사용(회사별/단일장비 FSD 대응)
+        if (donor.distribution_text && String(donor.distribution_text).trim()) {
+          const lines = String(donor.distribution_text)
+            .split('\n')
+            .map((x) => x.trim())
+            .filter(Boolean);
+          if (lines.length) {
+            listEl.innerHTML = lines.map((x) => `<li>${esc(x)}</li>`).join('');
+            return;
+          }
+        }
+
         [
           { minute: 15, base: Number(donor.baseline_15 || 0), threshold: Number(donor.threshold || 0), out: Number(donor.shift_out_15 || 0) },
           { minute: 30, base: Number(donor.baseline_30 || 0), threshold: Number(donor.threshold || 0), out: Number(donor.shift_out_30 || 0) },
@@ -356,10 +355,8 @@
       if (btnRun.disabled) return;
 
       const lookback_hours = Number(lookbackEl.value || 24);
-      const top_k = Number(topkEl.value || 2);
+      const customer_name = String(customerNameEl.value || '').trim();
       const idle_op_status_threshold = Number(idleThresholdEl.value || 0.05);
-      const force_exceed_demo = !!forceExceedEl.checked;
-      const force_exceed_margin_ratio = Number(forceMarginEl.value || 0.05);
 
       btnRun.disabled = true;
       btnRun.textContent = '실행 중...';
@@ -372,10 +369,8 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             lookback_hours,
-            top_k,
+            customer_name: customer_name || null,
             idle_op_status_threshold,
-            force_exceed_demo,
-            force_exceed_margin_ratio,
           }),
         });
 

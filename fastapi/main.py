@@ -5,6 +5,7 @@ import warnings
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -20,6 +21,8 @@ from api.routers.simulate_router import router as simulate_router
 from api.routers.model_router import router as model_router
 from api.routers.monitoring_router import router as monitoring_router
 from api.routers.optimize_router import router as optimize_router
+
+load_dotenv()
 
 # FastAPI 시작/종료 시점에 실행할 초기화/정리 로직
 @asynccontextmanager

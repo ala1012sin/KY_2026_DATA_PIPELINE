@@ -37,10 +37,8 @@ def peak_dispatch_test(req: PeakDispatchRequest):
     try:
         result = optimize_peak_dispatch_test(
             lookback_hours=req.lookback_hours,
-            top_k=req.top_k,
+            customer_name=req.customer_name,
             idle_op_status_threshold=req.idle_op_status_threshold,
-            force_exceed_demo=req.force_exceed_demo,
-            force_exceed_margin_ratio=req.force_exceed_margin_ratio,
         )
         record_api_event(endpoint="/optimize/peak-dispatch-test", device_id=None, status_code=200)
         return result

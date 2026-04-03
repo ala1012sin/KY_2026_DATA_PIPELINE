@@ -62,9 +62,11 @@ def infer_target_col_robust(df: pd.DataFrame, candidates: Tuple[str, ...], requi
     if scored and scored[0][0] > 0:
         return scored[0][1]
 
-    if numeric_cols:
+    safe_exclude = ("hour", "dayofweek", "isweekend", "isbusiness", "split", "session", "gap", "nobs")
+    numeric_fallback = [c for c in numeric_cols if not any(tok in _norm_col_name(c) for tok in safe_exclude)]
+    if numeric_fallback:
         tmp = []
-        for c in numeric_cols:
+        for c in numeric_fallback:
             s = pd.to_numeric(df[c], errors="coerce").replace([np.inf, -np.inf], np.nan)
             tmp.append((int(s.notna().sum()), float(s.std(skipna=True) or 0.0), c))
         tmp = sorted(tmp, key=lambda x: (-x[0], -x[1], x[2]))
@@ -78,6 +80,15 @@ def infer_target_col_robust(df: pd.DataFrame, candidates: Tuple[str, ...], requi
 # =========================
 # Preprocess helpers
 # =========================
+def _normalize_pandas_freq_rule(rule: str) -> str:
+    """Normalize deprecated pandas freq aliases (e.g. 15T -> 15min)."""
+    text = str(rule or "").strip()
+    if not text:
+        return "15min"
+    # pandas deprecates 'T' alias for minutes, so map it to 'min'.
+    return re.sub(r"(?i)(\d+)t$", r"\1min", text)
+
+
 def resample_15m_per_device(
     df: pd.DataFrame,
     time_col: str,
@@ -109,7 +120,8 @@ def resample_15m_per_device(
     for c in num_cols:
         agg_map[c] = "max" if _is_state_col(c, d[c]) else "mean"
 
-    grp = d.groupby(device_col).resample(rule, on=time_col)
+    normalized_rule = _normalize_pandas_freq_rule(rule)
+    grp = d.groupby(device_col).resample(normalized_rule, on=time_col)
     # pandas 버전에 따라 resample 객체에서 컬럼 서브셋팅이 tuple 처리로 해석될 수 있어
     # 서브셋팅 없이 agg_map만 직접 전달한다.
     agg_df = grp.agg(agg_map)
@@ -187,19 +199,20 @@ def add_feature_engineering(
     base_cols: List[str],
     lag_steps: Tuple[int, ...], roll_windows: Tuple[int, ...], diff_steps: Tuple[int, ...],
     add_pct_change: bool, pct_eps: float,
-    add_roll_std: bool = False,   
-    session_col: Optional[str] = "session_id", 
+    add_roll_std: bool = False,
+    session_col: Optional[str] = "session_id",
+    split_col: Optional[str] = "split",
 ) -> pd.DataFrame:
     d = df_15.copy().sort_values([device_col, time_col])
 
-    # 세션 단위로 groupby (session_col 없으면 device 단위로 fallback)
+    keys = [device_col]
+    if split_col and split_col in d.columns:
+        keys.append(split_col)
     if session_col and session_col in d.columns:
-        keys = [device_col, session_col]
-        gb = d.groupby(keys, group_keys=False)
-        reset_lv = [0, 1]
-    else:
-        gb = d.groupby(device_col, group_keys=False)
-        reset_lv = 0
+        keys.append(session_col)
+
+    gb = d.groupby(keys, group_keys=False, sort=False)
+    reset_lv = list(range(len(keys))) if len(keys) > 1 else 0
 
     # 여러 feature 생성
     for col in base_cols:
@@ -231,7 +244,7 @@ def add_gap_features(df_15: pd.DataFrame, time_col: str, device_col: str, rule: 
     lag feature를 의미 있게 만들기 위해서 운영시간(10:00 ~ 19:00) 외의 시간에서의 갭을 feature로 추가
     """
     d = df_15.copy().sort_values([device_col, time_col])
-    step = pd.to_timedelta(rule)
+    step = pd.to_timedelta(_normalize_pandas_freq_rule(rule))
 
     if n_obs_col not in d.columns:
         d[n_obs_col] = 1
@@ -265,7 +278,7 @@ def add_session_features(
     """
     d = df_15.copy().sort_values([device_col, time_col])
 
-    step_min = int(pd.to_timedelta(rule).total_seconds() // 60)
+    step_min = int(pd.to_timedelta(_normalize_pandas_freq_rule(rule)).total_seconds() // 60)
 
     if gap_col not in d.columns:
         # gap 없으면 time diff로 추정(최소 안전장치)
@@ -295,14 +308,24 @@ def add_session_features(
     return d
 
 
-def add_targets(df_feat: pd.DataFrame, time_col: str, device_col: str, target_col: str, horizons_steps: Tuple[int, int]) -> pd.DataFrame:
-    """장비별 타겟값 생성 (세션 경계 넘지 않도록 session_id 기준 포함)"""
+def add_targets(
+    df_feat: pd.DataFrame,
+    time_col: str,
+    device_col: str,
+    target_col: str,
+    horizons_steps: Tuple[int, int],
+    session_col: Optional[str] = "session_id",
+    split_col: Optional[str] = "split",
+) -> pd.DataFrame:
+    """장비별 타겟값 생성 (split/session 경계를 넘지 않도록 그룹 기준 포함)"""
     d = df_feat.copy().sort_values([device_col, time_col])
 
-    if "session_id" in d.columns:
-        gb = d.groupby([device_col, "session_id"], group_keys=False)
-    else:
-        gb = d.groupby(device_col, group_keys=False)
+    keys = [device_col]
+    if split_col and split_col in d.columns:
+        keys.append(split_col)
+    if session_col and session_col in d.columns:
+        keys.append(session_col)
+    gb = d.groupby(keys, group_keys=False, sort=False)
 
     h1, h2 = horizons_steps
     d["y_15"] = gb[target_col].shift(-h1)

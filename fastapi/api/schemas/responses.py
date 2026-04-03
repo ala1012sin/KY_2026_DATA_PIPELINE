@@ -44,8 +44,6 @@ class SimulateDevicesResponse(BaseModel):
     """시뮬레이션 장비 목록 응답 스키마."""
     total: int
     devices: List[str] = Field(default_factory=list)
-    exclude_warned: bool = False
-    excluded_warned_count: int = 0
 
 
 class SimulationTemplateResponse(BaseModel):
@@ -55,8 +53,6 @@ class SimulationTemplateResponse(BaseModel):
     base_log_id: Optional[int] = None
     editable_fields: Dict[str, Optional[float]] = Field(default_factory=dict)
     baseline: DevicePredictionResponse
-    error_rates: Dict[str, Any] = Field(default_factory=dict)
-    simulation_notice: str = ""
 
 
 class SimulationPredictResponse(BaseModel):
@@ -66,8 +62,6 @@ class SimulationPredictResponse(BaseModel):
     overrides: Dict[str, float] = Field(default_factory=dict)
     baseline: DevicePredictionResponse
     simulated: DevicePredictionResponse
-    error_rates: Dict[str, Any] = Field(default_factory=dict)
-    simulation_notice: str = ""
     delta: Dict[str, float] = Field(default_factory=dict)
 
 
@@ -109,6 +103,8 @@ class MilpTestResponse(BaseModel):
 class PeakDispatchDeviceResult(BaseModel):
     """장비별 피크 분배 결과 스키마."""
     device_id: str
+    customer_id: Optional[str] = None
+    company_name: Optional[str] = None
     is_donor: bool
     is_idle: bool
     op_status_mean: float
@@ -127,6 +123,7 @@ class PeakDispatchDeviceResult(BaseModel):
     required_shift_30: float
     distributed_targets_15: List[Dict[str, Any]] = Field(default_factory=list)
     distributed_targets_30: List[Dict[str, Any]] = Field(default_factory=list)
+    distribution_text: Optional[str] = None
     slack_15: float
     slack_30: float
 
@@ -143,10 +140,7 @@ class PeakDispatchResponse(BaseModel):
     success: bool
     message: str
     lookback_hours: int
-    top_k: int
     idle_op_status_threshold: float
-    force_exceed_demo: bool = False
-    force_exceed_margin_ratio: float = 0.05
     device_count: int
     donor_device_ids: List[str] = Field(default_factory=list)
     idle_device_ids: List[str] = Field(default_factory=list)
@@ -159,6 +153,7 @@ class PeakDispatchResponse(BaseModel):
     allocation_plan: List[Dict[str, Any]] = Field(default_factory=list)
     devices: List[PeakDispatchDeviceResult] = Field(default_factory=list)
     skipped_devices: List[PeakDispatchSkippedDevice] = Field(default_factory=list)
+    company_summaries: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class MonitoringDailyCount(BaseModel):

@@ -1,10 +1,9 @@
 """예측/시뮬레이션 공통 비즈니스 로직 서비스."""
 
+import ast
 import os
 import re
-import csv
 from datetime import datetime, timedelta
-from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -17,7 +16,6 @@ from infrastructure.queryFactory.base_orm import BaseQueryFactory
 from setting.database_orm import db_connection_pool
 from service.model_store import ModelStore
 from service.processing.config import PreprocessConfig
-from service.processing.create_report import build_device_level_table
 from service.processing.pipeline import (
     DataNotFoundError,
     fetch_pems_pro_log_df,
@@ -44,17 +42,45 @@ def _to_base_feature_name(feature_name: str) -> str:
     return base
 
 
+def _expand_feature_name_tokens(feature_name: str) -> List[str]:
+    # "('PRESSURE', 'LOG_ID')" 같은 tuple-string 피처도 raw 컬럼 후보로 펼친다.
+    base = _to_base_feature_name(feature_name)
+    tokens = {base}
+
+    try:
+        parsed = ast.literal_eval(base)
+    except Exception:
+        parsed = None
+
+    if isinstance(parsed, (tuple, list)):
+        for item in parsed:
+            token = str(item).strip()
+            if token:
+                tokens.add(token)
+
+    return [token for token in tokens if token]
+
+
 def resolve_editable_raw_fields(feature_cols: List[str], raw_columns: List[str]) -> List[str]:
     # 직접 제어 의미가 낮은 식별/시간/타깃성 컬럼은 시뮬 입력에서 제외
-    raw_excludes = {"LOG_ID", "DEVICE_ID", "LOG_DT", "CURVOLTAGE", "OP_STATUS", "CSUSAGETIME", "MGREFILLTIME"}
-    base_feature_names = {_to_base_feature_name(col) for col in feature_cols}
+    raw_excludes = {
+        "LOG_ID", "DEVICE_ID", "LOG_DT",
+        "CURVOLTAGE", "CUR_VOLTAGE",
+        "AVG_VOLTAGE", "AVG_CURRENT",
+        "OP_STATUS", "CSUSAGETIME", "MGREFILLTIME",
+    }
+    base_feature_names = {
+        token
+        for col in feature_cols
+        for token in _expand_feature_name_tokens(col)
+    }
     return [
         col for col in raw_columns
         if col not in raw_excludes and col in base_feature_names
     ]
 
 
-def list_model_device_ids(exclude_warned: bool = False) -> List[str]:
+def list_model_device_ids() -> List[str]:
     # 모델 저장소(device=...) 디렉터리 기준으로 장비 목록 구성
     if not os.path.isdir(MODEL_ROOT):
         return []
@@ -67,59 +93,7 @@ def list_model_device_ids(exclude_warned: bool = False) -> List[str]:
             if device_id:
                 device_ids.append(device_id)
 
-    devices = sorted(set(device_ids))
-    if not exclude_warned:
-        return devices
-
-    return [device_id for device_id in devices if not get_device_simulation_notice(device_id)]
-
-
-@lru_cache(maxsize=1)
-def load_best_model_metrics_table() -> pd.DataFrame:
-    # 장비 성능표는 빈번히 재사용되므로 1회 로드 후 캐시
-    try:
-        return build_device_level_table(out_dir=MODEL_ROOT)
-    except Exception as e:
-        logger.warning(f"[AI 예측] 오차율 테이블 로드 실패: {e}")
-        return pd.DataFrame()
-
-
-def get_device_error_rates(device_id: str) -> Dict[str, Any]:
-    # 시뮬레이션 화면 참고용 지표만 추려 반환
-    table = load_best_model_metrics_table()
-    if table.empty or "device" not in table.columns:
-        return {}
-
-    rows = table[table["device"].astype(str) == str(device_id)]
-    if rows.empty:
-        return {}
-
-    row = rows.iloc[0]
-    out: Dict[str, Any] = {}
-    fields = [
-        "NMAE_15_pct",
-        "NMAE_30_pct",
-        "MAE_15m",
-        "MAE_30m",
-        "usage_mean_w",
-        "pass_filter",
-        "exclude_reason",
-    ]
-
-    for field in fields:
-        if field not in row.index:
-            continue
-        value = row[field]
-        if pd.isna(value):
-            continue
-        if field == "pass_filter":
-            out[field] = bool(value)
-        elif isinstance(value, (int, float)):
-            out[field] = float(value)
-        else:
-            out[field] = str(value)
-
-    return out
+    return sorted(set(device_ids))
 
 
 def predict_one_device(device_id: str, lookback_hours: int, max_data_age_hours: int) -> Dict[str, Any]:
@@ -164,6 +138,7 @@ def predict_from_preprocessed(
     meta: Dict[str, Any],
     max_data_age_hours: int,
     enforce_freshness: bool,
+    reference_timestamp: Optional[Any] = None,
 ) -> Dict[str, Any]:
     # 전처리 결과(DataFrame)에서 장비/시간 검증 후 모델 입력을 구성
     df = meta.get("df_sup")
@@ -214,15 +189,37 @@ def predict_from_preprocessed(
             detail=f"예측에 필요한 전처리 행이 부족합니다. 필요={required_rows}, 현재={len(df)}",
         )
 
-    rows = df.tail(required_rows).to_dict(orient="records")
+    selected = df
+    if reference_timestamp is not None:
+        ref_ts = pd.Timestamp(reference_timestamp)
+        if ref_ts.tzinfo is not None:
+            ref_ts = ref_ts.tz_convert("UTC").tz_localize(None)
+
+        candidate = df[df[time_col] <= ref_ts]
+        if candidate.empty:
+            candidate = df[df[time_col] == df[time_col].min()]
+        selected = candidate
+
+    if len(selected) < required_rows:
+        raise HTTPException(
+            status_code=400,
+            detail=f"기준시각 기준 예측 행이 부족합니다. 필요={required_rows}, 현재={len(selected)}",
+        )
+
+    rows_df = selected.tail(required_rows)
+    rows = rows_df.to_dict(orient="records")
     preds, _ = runner.predict(rows)
+
+    selected_ts = pd.Timestamp(rows_df.iloc[-1][time_col])
+    if selected_ts.tzinfo is not None:
+        selected_ts = selected_ts.tz_convert("UTC").tz_localize(None)
 
     return {
         "device_id": device_id,
         "best_model": runner.best_model,
         "preds": preds,
         "missing_features": runner.last_missing_features,
-        "base_timestamp": base_ts.isoformat(),
+        "base_timestamp": selected_ts.isoformat(),
     }
 
 
@@ -242,38 +239,6 @@ def parse_base_timestamp(base_timestamp: str) -> datetime:
 def clear_model_caches() -> None:
     # 모델 객체/성능표 캐시를 모두 비움
     store.clear_cache()
-    load_best_model_metrics_table.cache_clear()
-
-
-@lru_cache(maxsize=256)
-def get_device_simulation_notice(device_id: str) -> str:
-    # 테스트 실측 타깃이 전부 0인 장비는 시뮬레이션 변화가 작을 수 있어 경고 제공
-    pred_path = os.path.join(MODEL_ROOT, f"device={device_id}", "best_predictions_test.csv")
-    if not os.path.exists(pred_path):
-        return ""
-
-    values: List[float] = []
-    try:
-        with open(pred_path, "r", encoding="utf-8-sig", newline="") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                for col in ("y_15_true", "y_30_true"):
-                    raw = row.get(col)
-                    if raw is None or str(raw).strip() == "":
-                        continue
-                    try:
-                        values.append(float(raw))
-                    except ValueError:
-                        continue
-    except Exception:
-        return ""
-
-    if not values:
-        return ""
-
-    if all(abs(v) < 1e-12 for v in values):
-        return "이 장비는 테스트 구간의 실제 타깃 값이 거의 0이라 입력을 바꿔도 예측 변화가 작거나 없을 수 있습니다."
-    return ""
 
 
 def predict_manual(device_id: str, rows: List[Dict[str, float]]) -> Dict[str, Any]:
@@ -347,8 +312,6 @@ def build_simulation_template(device_id: str, lookback_hours: int = 24) -> Dict[
         "base_log_id": (None if "LOG_ID" not in raw.columns else int(latest["LOG_ID"])),
         "editable_fields": values,
         "baseline": baseline,
-        "error_rates": get_device_error_rates(device_id),
-        "simulation_notice": get_device_simulation_notice(device_id),
     }
 
 
@@ -407,8 +370,25 @@ def run_simulation(
         if abs(float(current_value) - float(value)) > 1e-9:
             effective_overrides[field] = float(value)
 
+    # 리샘플(mean) 기반 입력에서 단일 raw 행만 바꾸면 변화가 매우 작을 수 있어,
+    # 선택 기준행이 속한 리샘플 bin 전체에 override를 적용한다.
+    target_ts_norm = pd.Timestamp(target_ts)
+    if target_ts_norm.tzinfo is not None:
+        target_ts_norm = target_ts_norm.tz_convert("UTC").tz_localize(None)
+
+    resample_rule = PreprocessConfig().resample_rule
+    normalized_rule = re.sub(r"(?i)(\d+)t$", r"\1min", str(resample_rule or "15min"))
+    bin_start = target_ts_norm.floor(normalized_rule)
+    bin_step = pd.to_timedelta(normalized_rule)
+    bin_end = bin_start + bin_step
+    bin_mask = (pd.to_datetime(raw["LOG_DT"], errors="coerce") >= bin_start) & (pd.to_datetime(raw["LOG_DT"], errors="coerce") < bin_end)
+
+    # 안전장치: bin 마스크가 비었으면 기존처럼 target_idx 단일 행에 적용
+    if not bool(bin_mask.any()):
+        bin_mask = (raw.index == target_idx)
+
     for field, value in effective_overrides.items():
-        raw.at[target_idx, field] = value
+        raw.loc[bin_mask, field] = value
 
     pcfg = PreprocessConfig()
     baseline_meta = preprocess_raw_df_to_supervised(raw=baseline_raw, pcfg=pcfg, persist_outputs=False)
@@ -418,6 +398,7 @@ def run_simulation(
         meta=baseline_meta,
         max_data_age_hours=24,
         enforce_freshness=False,
+        reference_timestamp=target_ts,
     )
 
     if effective_overrides:
@@ -428,6 +409,7 @@ def run_simulation(
             meta=simulated_meta,
             max_data_age_hours=24,
             enforce_freshness=False,
+            reference_timestamp=target_ts,
         )
     else:
         simulated = baseline
@@ -549,7 +531,5 @@ def run_simulation(
         "overrides": effective_overrides,
         "baseline": baseline,
         "simulated": simulated,
-        "error_rates": get_device_error_rates(device_id),
-        "simulation_notice": get_device_simulation_notice(device_id),
         "delta": result_value["delta"],
     }

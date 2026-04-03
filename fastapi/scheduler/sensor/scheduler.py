@@ -4,24 +4,19 @@ from datetime import datetime
 from typing import Dict, Optional, Union
 
 import requests
+from dotenv import load_dotenv
 from Logger import Logger as logger
 
 from setting.database_orm import db_connection_pool
 from db.public.models import *
 from infrastructure.queryFactory.base_orm import BaseQueryFactory
 
+load_dotenv()
+
 
 class SensorScheduler:
     """센서 데이터 API 스케줄러 클래스"""
 
-
-    BASE_URL = os.getenv("KY_DEVICE_DATA_URL")
-    API_TOKEN = os.getenv("KY_API_TOKEN", "") #인증 토큰 생길 시 사용
-
-    TIMEOUT_SEC = float(os.getenv("KY_API_TIMEOUT", "10"))
-    RETRIES = int(os.getenv("KY_API_RETRIES", "2")) 
-    RETRY_BACKOFF_SEC = float(os.getenv("KY_API_RETRY_BACKOFF", "1.0"))
-    
     # 데이터 조회 후 분류 용
     DEVICE_TYPE_AI_PEMS = 1
     DEVICE_TYPE_PEMSPRO = 2
@@ -37,7 +32,22 @@ class SensorScheduler:
         """
         self.db = db_session
         self.logger = logger
-        self.http = requests.Session()  
+        self.base_url = os.getenv("KY_DEVICE_DATA_URL", "").strip()
+        self.api_token = os.getenv("KY_API_TOKEN", "").strip()
+        self.timeout_sec = float(os.getenv("KY_API_TIMEOUT", "10"))
+        self.retries = int(os.getenv("KY_API_RETRIES", "2"))
+        self.retry_backoff_sec = float(os.getenv("KY_API_RETRY_BACKOFF", "1.0"))
+        self.http = requests.Session()
+        self.http.headers.update({"Accept": "application/json"})
+        if self.api_token:
+            self.http.headers.update({"Authorization": f"Bearer {self.api_token}"})
+
+    def _safe_rollback(self) -> None:
+        """레코드 처리 중 DB 예외가 나면 다음 루프 전에 세션 상태를 복구한다."""
+        try:
+            self.db.rollback()
+        except Exception as rollback_error:
+            self.logger.error(f"센서 스케줄러 롤백 실패: {rollback_error}")
 
     def _get_or_create_device_by_identity(
         self, serial_no: str, device_type: int, device_num: Union[int, str], extra_data: Optional[Dict] = None
@@ -83,12 +93,16 @@ class SensorScheduler:
             "limit": limit,
         }
 
+        if not self.base_url:
+            self.logger.error("KY API 수신 실패: KY_DEVICE_DATA_URL 환경변수가 비어 있습니다")
+            return []
+
         last_err = None
 
-        for attempt in range(self.RETRIES + 1):
+        for attempt in range(self.retries + 1):
             try:
                 # GET 요청으로 센서 데이터 수집
-                resp = self.http.get(self.BASE_URL, params=params, timeout=self.TIMEOUT_SEC)
+                resp = self.http.get(self.base_url, params=params, timeout=self.timeout_sec)
 
                 self.logger.info(f"KY API 요청: {resp.url}")
 
@@ -97,7 +111,18 @@ class SensorScheduler:
                     if not resp.text or not resp.text.strip():
                         self.logger.info("KY API 응답: 200 (데이터 없음)")
                         return []
-                    data = resp.json()
+
+                    try:
+                        data = resp.json()
+                    except ValueError as e:
+                        preview = resp.text[:300].replace("\n", " ")
+                        self.logger.error(f"KY API JSON 파싱 실패: {e} / body={preview}")
+                        return []
+
+                    if not isinstance(data, list):
+                        self.logger.error(f"KY API 응답 형식 오류: list가 아니라 {type(data).__name__}")
+                        return []
+
                     self.logger.info(f"KY API 응답: 200 (데이터 {len(data)}건)")
                     return data
 
@@ -111,20 +136,26 @@ class SensorScheduler:
                     return []
 
                 # 기타 오류
-                self.logger.error(f"KY API 응답: HTTP {resp.status_code} (요청 실패)")
+                preview = resp.text[:300].replace("\n", " ")
+                self.logger.error(f"KY API 응답: HTTP {resp.status_code} (요청 실패) / body={preview}")
                 return []
 
-            except Exception as e:
+            except requests.RequestException as e:
                 last_err = e
                 # 재시도 로그도 한글로 짧게
-                if attempt < self.RETRIES:
-                    wait = self.RETRY_BACKOFF_SEC * (attempt + 1)
-                    self.logger.warning(f"KY API 통신 오류 → {wait:.1f}초 후 재시도 ({attempt+1}/{self.RETRIES})")
+                if attempt < self.retries:
+                    wait = self.retry_backoff_sec * (attempt + 1)
+                    self.logger.warning(
+                        f"KY API 통신 오류: {type(e).__name__} → {wait:.1f}초 후 재시도 ({attempt+1}/{self.retries})"
+                    )
                     time.sleep(wait)
                     continue
 
-                self.logger.error(f"KY API 최종 실패 (재시도 종료): {type(e).__name__}")
-            return []
+                self.logger.error(f"KY API 최종 실패 (재시도 종료): {type(e).__name__}: {e}")
+                return []
+            except Exception as e:
+                self.logger.error(f"KY API 수신 처리 중 예외 발생: {type(e).__name__}: {e}")
+                return []
 
         # 보통 도달 안 함
         self.logger.error(f"KY API 최종 실패: {last_err}")
@@ -204,11 +235,10 @@ class SensorScheduler:
                 log_dt = self._parse_datetime(item['dt'])
 
                 # 디바이스 조회 또는 생성
-                # 디바이스 갱신 데이터 구성 (csSetTime, mgRefillSetTime, opStatus)
+                # 디바이스 갱신 데이터 구성 (device 테이블에 존재하는 컬럼만 반영)
                 update_data = {
                     'cs_set_time': item['pemsProPlus'].get('csSetTime'),
                     'mg_refill_set_time': item['pemsProPlus'].get('mgRefillSetTime'),
-                    'op_status': item['pemsProPlus'].get('opStatus'),
                 }
                 # 디바이스 없으면 생성, 있으면 상태 업데이트
                 device = self._get_or_create_device_by_identity(
@@ -275,6 +305,7 @@ class SensorScheduler:
 
             except Exception as e:
                 # 특정 레코드 처리 실패 시 다음 레코드로 진행
+                self._safe_rollback()
                 self.logger.error(f"PEMSPROPLUS 데이터 적재 중 에러 발생: {e}")
                 continue
 
@@ -334,6 +365,7 @@ class SensorScheduler:
                 success_count += 1
 
             except Exception as e:
+                self._safe_rollback()
                 self.logger.error(f"PERMPRO 데이터 적재 중 에러 발생: {e}")
                 continue
 
@@ -392,6 +424,7 @@ class SensorScheduler:
 
             except Exception as e:
                 # 특정 레코드 처리 실패 시 다음 레코드로 진행
+                self._safe_rollback()
                 self.logger.error(f"FLOW 데이터 적재 중 에러 발생: {e}")
                 continue
 
@@ -456,6 +489,7 @@ class SensorScheduler:
 
             except Exception as e:
                 # 특정 레코드 처리 실패 시 다음 레코드로 진행
+                self._safe_rollback()
                 self.logger.error(f"AI_PEMS 데이터 적재 중 에러 발생: {e}")
                 continue
 

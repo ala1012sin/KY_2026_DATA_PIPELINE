@@ -205,13 +205,12 @@
     async function loadDeviceOptions() {
       const previousValue = deviceIdEl.value;
       try {
-        const query = new URLSearchParams({ exclude_warned: excludeWarnedEl.checked ? 'true' : 'false' });
-        const res = await fetch(`/api/simulate/devices?${query.toString()}`);
+        const res = await fetch('/api/simulate/devices');
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'device list fetch failed');
 
         const devices = Array.isArray(data.devices) ? data.devices : [];
-        lastExcludedWarnedCount = Number(data.excluded_warned_count || 0);
+        lastExcludedWarnedCount = 0;
         deviceIdEl.innerHTML = '';
 
         const placeholder = document.createElement('option');
@@ -317,7 +316,7 @@
       `;
     }
 
-    function renderDeltaSummary(targetEl, delta, baselineErrorRates = null, simulatedErrorRates = null) {
+    function renderDeltaSummary(targetEl, delta) {
       const parts = [];
 
       if (delta) {
@@ -330,16 +329,6 @@
         parts.push(`<div class="result-msg">15분 예측값은 기준 대비 <b class="${y15Tone.className}">${y15Tone.icon} ${formatFixedNum(Math.abs(y15Pct), 2)}%</b> ${y15Tone.statusText} (<span class="${y15Tone.className}">${formatSignedKw(y15Delta, 3)} kW</span>).</div>`);
         parts.push(`<div class="result-msg" style="margin-top:8px;">30분 예측값은 기준 대비 <b class="${y30Tone.className}">${y30Tone.icon} ${formatFixedNum(Math.abs(y30Pct), 2)}%</b> ${y30Tone.statusText} (<span class="${y30Tone.className}">${formatSignedKw(y30Delta, 3)} kW</span>).</div>`);
       }
-
-      const nmae15 = simulatedErrorRates?.NMAE_15_pct ?? baselineErrorRates?.NMAE_15_pct;
-      const nmae30 = simulatedErrorRates?.NMAE_30_pct ?? baselineErrorRates?.NMAE_30_pct;
-
-      //if (nmae15 !== undefined || nmae30 !== undefined) {
-      //  parts.push(`<div class="result-msg" style="margin-top:${parts.length ? '10px' : '0'};">모델 신뢰도 참고치(오차율, 15분): <b>${nmae15 === undefined ? '-' : `${formatNum(nmae15, 2)}%`}</b></div>`);
-      //  parts.push(`<div class="result-msg" style="margin-top:6px;">모델 신뢰도 참고치(오차율, 30분): <b>${nmae30 === undefined ? '-' : `${formatNum(nmae30, 2)}%`}</b></div>`);
-      //} else {
-      //  parts.push(`<div class="result-msg" style="margin-top:${parts.length ? '10px' : '0'};">모델 신뢰도 참고치(NMAE) 데이터가 없습니다.</div>`);
-      //}
 
       if (parts.length === 0) {
         targetEl.innerHTML = '<div class="muted">비교 결과가 없습니다.</div>';
@@ -539,14 +528,10 @@
         baseInfo.textContent = `기준 시각=${data.base_timestamp}, 모델=${data.baseline?.best_model || '-'}, 변경 가능 항목=${editableCount}`;
         renderPredictSummary(baselineResultEl, data.baseline || {});
         simulatedResultEl.innerHTML = '<div class="muted">시뮬레이션 실행 후 결과가 표시됩니다.</div>';
-        renderDeltaSummary(deltaResultEl, null, data.error_rates || null, null);
+        renderDeltaSummary(deltaResultEl, null);
         renderCompareChart(data.baseline || {}, null);
         renderImpactChart([], '시뮬레이션 실행 후 영향도 막대가 표시됩니다.');
         btnSimulate.disabled = editableCount === 0;
-
-        if (showNotice && data.simulation_notice) {
-          openAlertModal(data.simulation_notice, false);
-        }
       } catch (e) {
         if (requestSeq !== templateRequestSeq) return;
         if (isNoDataErrorMessage(e?.message)) {
@@ -633,14 +618,6 @@
       resetSimulationState();
       await loadDeviceOptions();
 
-      if (excludeWarnedEl.checked) {
-        const selectedOption = deviceIdEl.options[deviceIdEl.selectedIndex];
-        const hasLoadError = selectedOption && selectedOption.textContent === '장비 목록 조회 실패';
-        if (!hasLoadError) {
-          openAlertModal(`경고 장비 ${lastExcludedWarnedCount}개를 제외했습니다.`, false);
-        }
-      }
-
       if (deviceIdEl.value) {
         await fetchTemplateData(true);
       }
@@ -675,7 +652,7 @@
 
         renderPredictSummary(baselineResultEl, data.baseline || {});
         renderPredictSummary(simulatedResultEl, data.simulated || {});
-        renderDeltaSummary(deltaResultEl, data.delta || null, data.error_rates || null, data.error_rates || null);
+        renderDeltaSummary(deltaResultEl, data.delta || null);
         renderCompareChart(data.baseline || {}, data.simulated || {});
         await computeAndRenderImpact(deviceId, lookback, overrides);
       } catch (e) {

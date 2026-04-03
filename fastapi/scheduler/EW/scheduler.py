@@ -2,17 +2,19 @@ from datetime import datetime
 from typing import Optional, Union
 
 import os
+import time
 import requests
+from dotenv import load_dotenv
 
 from Logger import Logger as logger
 from db.public.models import TB_DEVICE, TB_WARN_ERROR_LOG
 from infrastructure.queryFactory.base_orm import BaseQueryFactory
 from service.ew_code_mapper import decode_ew_code_text
 
+load_dotenv()
+
 class EWScheduler:
     """Error/Warning 데이터 API 스케줄러 클래스"""
-
-    BASE_URL = os.getenv("KY_ERROR_DATA_URL")
     _ZERO_CODES = {"0x0000000000000000", "0x0", "0"}
 
     def __init__(self, db_session):
@@ -24,6 +26,22 @@ class EWScheduler:
         """
         self.db = db_session
         self.logger = logger
+        self.base_url = os.getenv("KY_ERROR_DATA_URL", "").strip()
+        self.api_token = os.getenv("KY_API_TOKEN", "").strip()
+        self.timeout_sec = float(os.getenv("KY_API_TIMEOUT", "10"))
+        self.retries = int(os.getenv("KY_API_RETRIES", "2"))
+        self.retry_backoff_sec = float(os.getenv("KY_API_RETRY_BACKOFF", "1.0"))
+        self.http = requests.Session()
+        self.http.headers.update({"Accept": "application/json"})
+        if self.api_token:
+            self.http.headers.update({"Authorization": f"Bearer {self.api_token}"})
+
+    def _safe_rollback(self) -> None:
+        """DB 예외 후 세션을 정상 상태로 되돌린다."""
+        try:
+            self.db.rollback()
+        except Exception as rollback_error:
+            self.logger.error(f"EW 스케줄러 롤백 실패: {rollback_error}")
 
     def _parse_datetime(self, dt_str: any) -> Optional[datetime]:
         """API 응답 시간 문자열을 datetime으로 변환"""
@@ -35,15 +53,19 @@ class EWScheduler:
 
     def _find_device_by_identity(self, serial_no: str, device_type: int, device_num: Union[int, str]):
         """serial_no + device_type + device_num 조합으로 디바이스 조회"""
-        return (
-            self.db.query(TB_DEVICE)
-            .filter(
-                TB_DEVICE.serial_no == serial_no,
-                TB_DEVICE.device_type == str(device_type),
-                TB_DEVICE.device_num == str(device_num),
+        try:
+            return (
+                self.db.query(TB_DEVICE)
+                .filter(
+                    TB_DEVICE.serial_no == serial_no,
+                    TB_DEVICE.device_type == str(device_type),
+                    TB_DEVICE.device_num == str(device_num),
+                )
+                .first()
             )
-            .first()
-        )
+        except Exception:
+            self._safe_rollback()
+            raise
 
     def _normalize_code(self, code: any) -> Optional[str]:
         """에러/경보 코드 정규화 (유효하지 않으면 None)"""
@@ -57,16 +79,20 @@ class EWScheduler:
     def _find_existing_log(
         self, device_id, ew_dt: datetime, code: str, error_warn: int
     ) -> Optional[TB_WARN_ERROR_LOG]:
-        return (
-            self.db.query(TB_WARN_ERROR_LOG)
-            .filter(
-                TB_WARN_ERROR_LOG.device_id == device_id,
-                TB_WARN_ERROR_LOG.ew_dt == ew_dt,
-                TB_WARN_ERROR_LOG.code == code,
-                TB_WARN_ERROR_LOG.error_warn == error_warn,
+        try:
+            return (
+                self.db.query(TB_WARN_ERROR_LOG)
+                .filter(
+                    TB_WARN_ERROR_LOG.device_id == device_id,
+                    TB_WARN_ERROR_LOG.ew_dt == ew_dt,
+                    TB_WARN_ERROR_LOG.code == code,
+                    TB_WARN_ERROR_LOG.error_warn == error_warn,
+                )
+                .first()
             )
-            .first()
-        )
+        except Exception:
+            self._safe_rollback()
+            raise
 
     def _insert_ew_log(
         self,
@@ -102,25 +128,70 @@ class EWScheduler:
         Returns:
             API 응답 데이터 리스트
         """
-        try:
-            params = {
-                "startDate": start_dt.strftime("%Y%m%d%H%M%S"),
-                "endDate": end_dt.strftime("%Y%m%d%H%M%S"),
-                "limit": limit,
-            }
+        params = {
+            "startDate": start_dt.strftime("%Y%m%d%H%M%S"),
+            "endDate": end_dt.strftime("%Y%m%d%H%M%S"),
+            "limit": limit,
+        }
 
-            response = requests.get(self.BASE_URL, params=params)
-
-            if response.status_code == 200 and response.text.strip():
-                data = response.json()
-                self.logger.info(f"EW API 데이터 수신 성공: {len(data)}개 항목")
-                return data
-
-            self.logger.error(f"EW API 요청 실패: {response.status_code}")
+        if not self.base_url:
+            self.logger.error("EW API 수신 실패: KY_ERROR_DATA_URL 환경변수가 비어 있습니다")
             return []
-        except Exception as e:
-            self.logger.error(f"EW API 요청 중 에러 발생: {e}")
-            return []
+
+        last_err = None
+
+        for attempt in range(self.retries + 1):
+            try:
+                response = self.http.get(self.base_url, params=params, timeout=self.timeout_sec)
+                self.logger.info(f"EW API 요청: {response.url}")
+
+                if response.status_code == 200:
+                    if not response.text or not response.text.strip():
+                        self.logger.info("EW API 응답: 200 (데이터 없음)")
+                        return []
+                    try:
+                        data = response.json()
+                    except ValueError as e:
+                        preview = response.text[:300].replace("\n", " ")
+                        self.logger.error(f"EW API JSON 파싱 실패: {e} / body={preview}")
+                        return []
+
+                    if not isinstance(data, list):
+                        self.logger.error(f"EW API 응답 형식 오류: list가 아니라 {type(data).__name__}")
+                        return []
+
+                    self.logger.info(f"EW API 응답: 200 (데이터 {len(data)}건)")
+                    return data
+
+                if response.status_code == 404:
+                    self.logger.error("EW API 응답: 404 (엔드포인트 없음) → Base URL/경로 변경 의심")
+                    return []
+
+                if response.status_code in (401, 403):
+                    self.logger.error(f"EW API 응답: {response.status_code} (인증/권한 문제)")
+                    return []
+
+                preview = response.text[:300].replace("\n", " ")
+                self.logger.error(f"EW API 응답: HTTP {response.status_code} (요청 실패) / body={preview}")
+                return []
+            except requests.RequestException as e:
+                last_err = e
+                if attempt < self.retries:
+                    wait = self.retry_backoff_sec * (attempt + 1)
+                    self.logger.warning(
+                        f"EW API 통신 오류: {type(e).__name__} → {wait:.1f}초 후 재시도 ({attempt+1}/{self.retries})"
+                    )
+                    time.sleep(wait)
+                    continue
+
+                self.logger.error(f"EW API 최종 실패 (재시도 종료): {type(e).__name__}: {e}")
+                return []
+            except Exception as e:
+                self.logger.error(f"EW API 수신 처리 중 예외 발생: {type(e).__name__}: {e}")
+                return []
+
+        self.logger.error(f"EW API 최종 실패: {last_err}")
+        return []
 
     def process_ew_data(self, data: list) -> int:
         """
@@ -201,6 +272,7 @@ class EWScheduler:
                         success_count += 1
 
             except Exception as e:
+                self._safe_rollback()
                 self.logger.error(f"EW 데이터 적재 중 에러 발생: {e}")
                 continue
 

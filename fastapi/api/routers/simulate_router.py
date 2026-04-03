@@ -1,5 +1,7 @@
 """시뮬레이션 관련 API 라우터."""
 
+import logging
+
 from fastapi import APIRouter, HTTPException
 
 from api.schemas.simulate import SimulatePredictRequest
@@ -12,20 +14,18 @@ from service.prediction_service import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.get("/simulate/devices", response_model=SimulateDevicesResponse)
-def list_simulation_devices(exclude_warned: bool = False):
+def list_simulation_devices():
     """시뮬레이션 대상 장비 ID 목록을 반환한다."""
     # 드롭다운/선택 UI용 장비 리스트
     try:
-        all_devices = list_model_device_ids(exclude_warned=False)
-        devices = list_model_device_ids(exclude_warned=exclude_warned)
+        devices = list_model_device_ids()
         result = {
             "total": len(devices),
             "devices": devices,
-            "exclude_warned": exclude_warned,
-            "excluded_warned_count": max(0, len(all_devices) - len(devices)),
         }
         record_api_event(endpoint="/simulate/devices", device_id=None, status_code=200)
         return result
@@ -33,6 +33,7 @@ def list_simulation_devices(exclude_warned: bool = False):
         record_api_event(endpoint="/simulate/devices", device_id=None, status_code=e.status_code, detail=str(e.detail))
         raise
     except Exception as e:
+        logger.exception("simulate devices failed")
         record_api_event(endpoint="/simulate/devices", device_id=None, status_code=500, detail=str(e))
         raise HTTPException(status_code=500, detail="시뮬레이션 장비 목록 조회 중 내부 오류가 발생했습니다") from e
 
@@ -54,6 +55,7 @@ def simulate_template(device_id: str, lookback_hours: int = 24):
         )
         raise
     except Exception as e:
+        logger.exception("simulate template failed: device_id=%s, lookback_hours=%s", device_id, lookback_hours)
         record_api_event(endpoint="/simulate/template/{device_id}", device_id=device_id, status_code=500, detail=str(e))
         raise HTTPException(status_code=500, detail="시뮬레이션 템플릿 생성 중 내부 오류가 발생했습니다") from e
 
@@ -83,5 +85,6 @@ def simulate_predict(req: SimulatePredictRequest):
         )
         raise
     except Exception as e:
+        logger.exception("simulate predict failed: device_id=%s", req.device_id)
         record_api_event(endpoint="/simulate/predict", device_id=req.device_id, status_code=500, detail=str(e))
         raise HTTPException(status_code=500, detail="시뮬레이션 예측 처리 중 내부 오류가 발생했습니다") from e
