@@ -1,14 +1,14 @@
 {
-  "threshold_p95": 35606.355833333335,
+  "threshold_p95": 36556.87578125,
   "threshold_meta": {
     "quantile": 0.95,
-    "n_points": 126,
+    "n_points": 2193,
     "filters": {
       "use_train_only": true,
       "use_business_hour_only": false,
       "use_op_true_only": true
     },
-    "target_col": "CURVOLTAGE",
-    "threshold": 35606.355833333335
+    "target_col": "CUR_VOLTAGE",
+    "threshold": 36556.87578125
   }
 }

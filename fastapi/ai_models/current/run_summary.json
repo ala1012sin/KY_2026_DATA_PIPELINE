@@ -3,46 +3,17 @@
   "time_col": "LOG_DT",
   "device_col": "DEVICE_ID",
   "out_dir": "./out_train",
-  "n_devices_seen": 42,
-  "n_devices_trained": 29,
+  "n_devices_seen": 12,
+  "n_devices_trained": 12,
   "files": {
     "all_model_results": "./out_train/all_model_results.csv",
-    "best_models_summary": "./out_train/best_models_summary.csv"
+    "best_models_summary": "./out_train/best_models_summary.csv",
+    "device_target_summary": "./out_train/device_target_summary.csv"
   },
   "saved_models": [
     {
-      "device": "0eab2f31-db53-42b5-9ff1-bc0decf1e90a",
-      "path": "./out_train/device=0eab2f31-db53-42b5-9ff1-bc0decf1e90a/best_model",
-      "best_model": "XGBoost"
-    },
-    {
       "device": "10020b75-e523-45b8-8905-4763865d6e19",
       "path": "./out_train/device=10020b75-e523-45b8-8905-4763865d6e19/best_model",
-      "best_model": "XGBoost"
-    },
-    {
-      "device": "110be74d-165d-407c-8b7c-ac8ea1a5ecd4",
-      "path": "./out_train/device=110be74d-165d-407c-8b7c-ac8ea1a5ecd4/best_model",
-      "best_model": "XGBoost"
-    },
-    {
-      "device": "19a59e1a-d32e-4494-8bbe-48d93b5927e6",
-      "path": "./out_train/device=19a59e1a-d32e-4494-8bbe-48d93b5927e6/best_model",
-      "best_model": "XGBoost"
-    },
-    {
-      "device": "3ccf37fc-247d-42ae-92bb-99c08aa4d1f7",
-      "path": "./out_train/device=3ccf37fc-247d-42ae-92bb-99c08aa4d1f7/best_model",
-      "best_model": "XGBoost"
-    },
-    {
-      "device": "3ea267c5-5e6f-4cd9-80d9-fd8817f4b807",
-      "path": "./out_train/device=3ea267c5-5e6f-4cd9-80d9-fd8817f4b807/best_model",
-      "best_model": "XGBoost"
-    },
-    {
-      "device": "3f777693-5345-428e-bf52-0b575fc53f20",
-      "path": "./out_train/device=3f777693-5345-428e-bf52-0b575fc53f20/best_model",
       "best_model": "XGBoost"
     },
     {
@@ -51,28 +22,8 @@
       "best_model": "XGBoost"
     },
     {
-      "device": "450102af-8be0-491a-bbd3-6399d9e70f68",
-      "path": "./out_train/device=450102af-8be0-491a-bbd3-6399d9e70f68/best_model",
-      "best_model": "XGBoost"
-    },
-    {
       "device": "684ce2ca-716e-47f0-a3b8-5cc60395f4a2",
       "path": "./out_train/device=684ce2ca-716e-47f0-a3b8-5cc60395f4a2/best_model",
-      "best_model": "RCNN"
-    },
-    {
-      "device": "6bb1fe3b-a775-4cf5-8bbb-6f435814cee5",
-      "path": "./out_train/device=6bb1fe3b-a775-4cf5-8bbb-6f435814cee5/best_model",
-      "best_model": "XGBoost"
-    },
-    {
-      "device": "724f4c96-2c07-49af-a06e-17bdefdc7db9",
-      "path": "./out_train/device=724f4c96-2c07-49af-a06e-17bdefdc7db9/best_model",
-      "best_model": "XGBoost"
-    },
-    {
-      "device": "76181b84-517a-4e3d-bd31-809ba092395a",
-      "path": "./out_train/device=76181b84-517a-4e3d-bd31-809ba092395a/best_model",
       "best_model": "XGBoost"
     },
     {
@@ -91,18 +42,8 @@
       "best_model": "XGBoost"
     },
     {
-      "device": "7da71867-aea3-4854-b152-db96a25ddf4f",
-      "path": "./out_train/device=7da71867-aea3-4854-b152-db96a25ddf4f/best_model",
-      "best_model": "GRU_LSTM"
-    },
-    {
       "device": "7f1a43fb-9559-4d4c-af83-aadca7fd6686",
       "path": "./out_train/device=7f1a43fb-9559-4d4c-af83-aadca7fd6686/best_model",
-      "best_model": "XGBoost"
-    },
-    {
-      "device": "88c15435-75a9-4058-a81e-38a0eda6bbe1",
-      "path": "./out_train/device=88c15435-75a9-4058-a81e-38a0eda6bbe1/best_model",
       "best_model": "XGBoost"
     },
     {
@@ -111,23 +52,8 @@
       "best_model": "XGBoost"
     },
     {
-      "device": "b6230c0b-6c2d-4dae-b170-ce937f36ea48",
-      "path": "./out_train/device=b6230c0b-6c2d-4dae-b170-ce937f36ea48/best_model",
-      "best_model": "XGBoost"
-    },
-    {
-      "device": "c41dc419-efeb-4187-bdb7-ec3ea848e7ec",
-      "path": "./out_train/device=c41dc419-efeb-4187-bdb7-ec3ea848e7ec/best_model",
-      "best_model": "XGBoost"
-    },
-    {
       "device": "cc74202d-eb54-4e29-886f-e08d0f0ba1cd",
       "path": "./out_train/device=cc74202d-eb54-4e29-886f-e08d0f0ba1cd/best_model",
-      "best_model": "XGBoost"
-    },
-    {
-      "device": "d85b8f21-d9bd-4d8d-9399-7de17d74fae3",
-      "path": "./out_train/device=d85b8f21-d9bd-4d8d-9399-7de17d74fae3/best_model",
       "best_model": "XGBoost"
     },
     {
@@ -138,21 +64,11 @@
     {
       "device": "e43f8a7a-2d75-4902-a1a0-27748f978ebd",
       "path": "./out_train/device=e43f8a7a-2d75-4902-a1a0-27748f978ebd/best_model",
-      "best_model": "CNN1D"
-    },
-    {
-      "device": "efb83ace-045a-4068-9489-ddf58ddaa41b",
-      "path": "./out_train/device=efb83ace-045a-4068-9489-ddf58ddaa41b/best_model",
       "best_model": "XGBoost"
     },
     {
-      "device": "f5a7cc72-ae15-4ccf-b5d2-1ad53fb2773a",
-      "path": "./out_train/device=f5a7cc72-ae15-4ccf-b5d2-1ad53fb2773a/best_model",
-      "best_model": "XGBoost"
-    },
-    {
-      "device": "fdcb9471-71c1-4d42-8e20-fb9ee7751669",
-      "path": "./out_train/device=fdcb9471-71c1-4d42-8e20-fb9ee7751669/best_model",
+      "device": "ea267c5-5e6f-4cd9-80d9-fd8817f4b807",
+      "path": "./out_train/device=ea267c5-5e6f-4cd9-80d9-fd8817f4b807/best_model",
       "best_model": "XGBoost"
     }
   ],
@@ -162,20 +78,45 @@
     "random_seed": 42,
     "dl_use_engineered_features": false,
     "min_rows_per_device_tabular": 30,
-    "enable_dl": true,
+    "enable_dl": false,
     "seq_len": 16,
-    "min_seq_samples": 20,
+    "min_seq_samples": 5,
     "batch_size": 64,
     "max_epochs": 30,
     "early_stop_patience": 5,
-    "skip_inactive_by_op": true,
+    "skip_inactive_by_op": false,
     "op_col_name": "OP_STATUS",
     "op_true_ratio_min": 0.05,
-    "xgb_trials": 25,
+    "skip_inactive_by_op_dl": false,
+    "op_true_ratio_min_dl": 0.1,
+    "min_train_rows_dl": 120,
+    "use_target_prefilter": true,
+    "prefilter_split": "train",
+    "prefilter_min_train_rows": 30,
+    "prefilter_min_train_days": 1,
+    "prefilter_min_target_nunique": 1,
+    "prefilter_min_nonzero_ratio": 0.0,
+    "prefilter_min_target_std": 10.0,
+    "prefilter_active_threshold": 10.0,
+    "prefilter_require_both_horizons": true,
+    "save_target_summary_csv": true,
+    "xgb_trials": 15,
     "dl_trials": 10,
-    "pruner_min_resource": 5,
-    "pruner_reduction_factor": 3,
+    "pruner_min_resource": 2,
+    "pruner_reduction_factor": 4,
     "save_predictions_test": true,
-    "save_all_models": false
+    "save_all_models": false,
+    "use_date_split": true,
+    "test_days": 3,
+    "cv_folds": 3,
+    "cv_val_days": 3,
+    "min_train_days": 5,
+    "use_train_based_winsorize": true,
+    "winsor_lower_q": 0.01,
+    "winsor_upper_q": 1.0,
+    "winsor_min_points": 30,
+    "xgb_use_scaler": true,
+    "xgb_compare_scaled": false,
+    "verbose_optuna": true
   }
 }
