@@ -1,7 +1,7 @@
 """대시보드용 통합 데이터 서비스."""
 
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from fastapi import HTTPException
 import pandas as pd
@@ -11,55 +11,6 @@ from service.prediction_service import predict_one_device
 from service.processing.config import PreprocessConfig
 from service.processing.pipeline import DataNotFoundError, fetch_pems_pro_log_df
 from service.processing.steps import resample_15m_per_device
-
-
-def get_recent_history(device_id: str, history_hours: int = 1) -> List[Dict[str, Any]]:
-    """최근 history_hours 구간의 15분 리샘플 시계열을 반환한다."""
-    end_dt = datetime.now()
-    start_dt = end_dt - timedelta(hours=history_hours)
-
-    try:
-        raw = fetch_pems_pro_log_df(start_dt=start_dt, end_dt=end_dt, device_ids=[device_id])
-    except DataNotFoundError:
-        return []
-
-    raw = raw[raw["DEVICE_ID"].astype(str) == str(device_id)].copy()
-    if raw.empty:
-        return []
-
-    pcfg = PreprocessConfig()
-    df15 = resample_15m_per_device(raw, "LOG_DT", "DEVICE_ID", pcfg.resample_rule, "none")
-    df15 = df15[df15["DEVICE_ID"].astype(str) == str(device_id)].copy()
-    df15 = df15[df15["n_obs"].fillna(0) > 0]
-    if df15.empty:
-        return []
-
-    df15["LOG_DT"] = pd.to_datetime(df15["LOG_DT"], errors="coerce")
-    df15 = df15.dropna(subset=["LOG_DT"]).sort_values("LOG_DT")
-
-    def _safe(row: pd.Series, col: str) -> Optional[float]:
-        try:
-            v = float(row.get(col))
-            import math
-            return None if math.isnan(v) or math.isinf(v) else v
-        except Exception:
-            return None
-
-    out: List[Dict[str, Any]] = []
-    for _, row in df15.iterrows():
-        out.append(
-            {
-                "timestamp": pd.Timestamp(row["LOG_DT"]).isoformat(),
-                "CURVOLTAGE": _safe(row, "CUR_VOLTAGE"),
-                "PRESSURE": _safe(row, "PRESSURE"),
-                "TEMPERATURE": _safe(row, "TEMPERATURE"),
-                "HZ": _safe(row, "HZ"),
-                "AVGCURRENT": _safe(row, "AVGCURRENT"),
-                "AVGVOLTAGE": _safe(row, "AVGVOLTAGE"),
-                "FACTOR": _safe(row, "FACTOR"),
-            }
-        )
-    return out
 
 
 def get_current_sensor_values(device_id: str) -> Dict[str, Optional[float]]:
@@ -176,9 +127,6 @@ def get_dashboard_data(device_id: str, lookback_hours: int = 24) -> Dict[str, An
     current_power_w = current.get("CURVOLTAGE")
     instantaneous_w = round(current_power_w, 4) if current_power_w is not None else None
 
-    # 6) 최근 1시간 시계열(그래프용)
-    recent_history = get_recent_history(device_id=device_id, history_hours=1)
-
     return {
         "device_id": device_id,
         "timestamp": datetime.now().isoformat(),
@@ -190,5 +138,4 @@ def get_dashboard_data(device_id: str, lookback_hours: int = 24) -> Dict[str, An
         },
         "instantaneous_power_w": instantaneous_w,
         "daily_energy_wh": daily_energy_wh,
-        "recent_history": recent_history,
     }
