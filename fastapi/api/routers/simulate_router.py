@@ -2,7 +2,7 @@
 
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from api.schemas.simulate import SimulatePredictRequest
 from api.schemas.responses import SimulationPredictResponse, SimulationTemplateResponse, SimulateDevicesResponse
@@ -39,7 +39,7 @@ def list_simulation_devices():
 
 
 @router.get("/simulate/template/{device_id}", response_model=SimulationTemplateResponse)
-def simulate_template(device_id: str, lookback_hours: int = 24):
+def simulate_template(device_id: str, lookback_hours: int = Query(24, ge=1, le=24 * 31)):
     """시뮬레이션 입력용 기준(raw) 값과 baseline 예측을 반환한다."""
     # 기준행, 변경 가능 필드, baseline 예측을 한 번에 조회
     try:
@@ -71,8 +71,7 @@ def simulate_predict(req: SimulatePredictRequest):
             lookback_hours=req.lookback_hours,
             base_timestamp=req.base_timestamp,
             base_log_id=req.base_log_id,
-            # 영향도 계산 요청 등에서는 저장을 끌 수 있도록 요청값 전달
-            save_log=req.save_log,
+            save_log=True,
         )
         record_api_event(endpoint="/simulate/predict", device_id=req.device_id, status_code=200)
         return result

@@ -1,0 +1,484 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>센서 피처 대시보드</title>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      background: #f0f2f5;
+      min-height: 100vh;
+      padding: 24px;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+    }
+    .header h1 {
+      font-size: 22px;
+      font-weight: 700;
+      color: #111827;
+      white-space: nowrap;
+    }
+    .controls {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+      margin-left: auto;
+    }
+    .controls input, .controls select {
+      padding: 8px 12px;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      font-size: 14px;
+      background: #fff;
+      min-width: 260px;
+    }
+    .controls button {
+      padding: 8px 18px;
+      background: #2563eb;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .controls button:disabled { background: #94a3b8; cursor: not-allowed; }
+
+    .timestamp {
+      font-size: 12px;
+      color: #6b7280;
+      white-space: nowrap;
+    }
+
+    /* ── 카드 그리드 ── */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+    .card {
+      background: #fff;
+      border-radius: 14px;
+      padding: 20px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+      position: relative;
+      overflow: hidden;
+    }
+    .card.highlight {
+      background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%);
+      color: #fff;
+    }
+    .card-label {
+      font-size: 13px;
+      color: #6b7280;
+      margin-bottom: 6px;
+      font-weight: 500;
+    }
+    .card.highlight .card-label { color: rgba(255,255,255,0.75); }
+    .card-value {
+      font-size: 32px;
+      font-weight: 700;
+      color: #111827;
+      line-height: 1.1;
+      margin-bottom: 10px;
+    }
+    .card.highlight .card-value { color: #fff; }
+    .card-dot {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+    .dot-up    { background: #10b981; }
+    .dot-down  { background: #ef4444; }
+    .dot-flat  { background: #f59e0b; }
+    .dot-none  { background: #d1d5db; }
+    .card-badges {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 10px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .badge-up   { background: #d1fae5; color: #065f46; }
+    .badge-down { background: #fee2e2; color: #991b1b; }
+    .badge-flat { background: #fef3c7; color: #92400e; }
+    .badge-abs  { font-size: 13px; color: #6b7280; font-weight: 500; }
+    .card.highlight .badge-abs { color: rgba(255,255,255,0.8); }
+    .card-pred-label {
+      font-size: 11px;
+      color: #9ca3af;
+      margin-bottom: 2px;
+      margin-top: 8px;
+    }
+    .card.highlight .card-pred-label { color: rgba(255,255,255,0.6); }
+
+    /* ── 전력 카드 2열 ── */
+    .power-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    /* ── 상태 바 ── */
+    .status-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: #fff;
+      border-radius: 10px;
+      padding: 10px 16px;
+      margin-bottom: 20px;
+      font-size: 13px;
+      color: #374151;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    }
+    .status-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: #d1d5db;
+    }
+    .status-dot.ok  { background: #10b981; }
+    .status-dot.err { background: #ef4444; }
+    .status-dot.loading { background: #f59e0b; animation: blink 1s infinite; }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+    .error-msg { color: #dc2626; font-size: 13px; }
+    .section-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #374151;
+      margin-bottom: 10px;
+    }
+    .chart-wrap {
+      background: #fff;
+      border-radius: 12px;
+      padding: 12px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+      margin-bottom: 16px;
+    }
+    .chart-controls {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+    .chart-controls select {
+      padding: 8px 10px;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      background: #fff;
+      font-size: 13px;
+    }
+    #trendChart { width: 100%; height: 360px; }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <h1>센서 피처 대시보드</h1>
+  <div class="controls">
+    <input type="text" id="deviceId" placeholder="장비 ID (UUID)" value="" />
+    <button id="fetchBtn" onclick="fetchDashboard()">조회</button>
+  </div>
+  <span class="timestamp" id="tsLabel">-</span>
+</div>
+
+<div class="status-bar">
+  <div class="status-dot" id="statusDot"></div>
+  <span id="statusMsg">장비 ID를 입력하고 조회하세요.</span>
+</div>
+
+<div class="section-title">센서 예측 (15분 후)</div>
+<div class="grid" id="sensorGrid"></div>
+
+<div class="section-title">전력량</div>
+<div class="power-grid" id="powerGrid"></div>
+
+<div class="section-title">최근 1시간 + 예측 추이</div>
+<div class="chart-wrap">
+  <div class="chart-controls">
+    <label for="trendFeature">피처 선택</label>
+    <select id="trendFeature">
+      <option value="CURVOLTAGE">순시전력(CURVOLTAGE)</option>
+      <option value="PRESSURE">압력(PRESSURE)</option>
+      <option value="TEMPERATURE">온도(TEMPERATURE)</option>
+      <option value="HZ">주파수(HZ)</option>
+      <option value="AVGCURRENT">전류(AVGCURRENT)</option>
+      <option value="AVGVOLTAGE">전압(AVGVOLTAGE)</option>
+      <option value="FACTOR">역률(FACTOR)</option>
+    </select>
+  </div>
+  <div id="trendChart"></div>
+</div>
+
+<script>
+// ────────────────────────────────────────
+// 설정
+// ────────────────────────────────────────
+const SENSOR_META = {
+  AVGVOLTAGE:  { label: '전압(Volt)',     unit: 'V',   fmt: 3, highlight: true },
+  AVGCURRENT:  { label: '전류(Ampere)',   unit: 'A',   fmt: 3 },
+  TEMPERATURE: { label: '온도(°C)',       unit: '°C',  fmt: 3 },
+  PRESSURE:    { label: '압력(Bar)',      unit: 'Bar', fmt: 3 },
+  HZ:          { label: '주파수(Hz)',     unit: 'Hz',  fmt: 3 },
+  FACTOR:      { label: '역률(Factor)',   unit: '',    fmt: 3 },
+};
+
+let latestDashboardData = null;
+
+
+// ────────────────────────────────────────
+// 상태 유틸
+// ────────────────────────────────────────
+function setStatus(state, msg) {
+  const dot = document.getElementById('statusDot');
+  dot.className = 'status-dot ' + state;
+  document.getElementById('statusMsg').textContent = msg;
+}
+
+// ────────────────────────────────────────
+// 조회
+// ────────────────────────────────────────
+async function fetchDashboard() {
+  const deviceId = document.getElementById('deviceId').value.trim();
+  if (!deviceId) { alert('장비 ID를 입력하세요.'); return; }
+  document.getElementById('fetchBtn').disabled = true;
+  setStatus('loading', '데이터 조회 중...');
+
+  try {
+    const res = await fetch(`/api/monitor/dashboard/${encodeURIComponent(deviceId)}?lookback_hours=24`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(err.detail || res.statusText);
+    }
+    const data = await res.json();
+    renderDashboard(data);
+    setStatus('ok', `조회 완료 · 장비: ${deviceId}`);
+    document.getElementById('tsLabel').textContent = '갱신: ' + new Date().toLocaleTimeString('ko-KR');
+  } catch (e) {
+    setStatus('err', '오류: ' + e.message);
+    document.getElementById('sensorGrid').innerHTML = `<div class="error-msg">${e.message}</div>`;
+    document.getElementById('powerGrid').innerHTML = '';
+  } finally {
+    document.getElementById('fetchBtn').disabled = false;
+  }
+}
+
+// ────────────────────────────────────────
+// 렌더링
+// ────────────────────────────────────────
+function fmt(v, digits) {
+  if (v === null || v === undefined) return '-';
+  return parseFloat(v).toLocaleString('ko-KR', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+}
+
+function pctBadge(current, pred) {
+  if (current === null || current === undefined || pred === null || pred === undefined) return '';
+  const abs = current === 0 ? null : ((pred - current) / Math.abs(current)) * 100;
+  const delta = pred - current;
+  let cls, sign, pctStr;
+  if (abs === null) {
+    cls = 'badge-flat'; sign = ''; pctStr = '±0%';
+  } else if (abs > 0.5) {
+    cls = 'badge-up';   sign = '+'; pctStr = sign + abs.toFixed(1) + '%';
+  } else if (abs < -0.5) {
+    cls = 'badge-down'; sign = '';  pctStr = abs.toFixed(1) + '%';
+  } else {
+    cls = 'badge-flat'; sign = '';  pctStr = '±0%';
+  }
+  const absDeltaStr = (delta >= 0 ? '+' : '') + delta.toLocaleString('ko-KR', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+  return `<span class="badge ${cls}">${pctStr}</span><span class="badge-abs">${absDeltaStr}</span>`;
+}
+
+function dotClass(current, pred) {
+  if (current === null || pred === null) return 'dot-none';
+  if (current === 0) return 'dot-flat';
+  const pct = (pred - current) / Math.abs(current) * 100;
+  if (pct > 0.5)  return 'dot-up';
+  if (pct < -0.5) return 'dot-down';
+  return 'dot-flat';
+}
+
+function renderSensorCard(key, meta, currentVal, pred15, pred30) {
+  const displayVal = currentVal !== null ? fmt(currentVal, meta.fmt) : '-';
+  const unit = meta.unit ? ` <span style="font-size:18px;font-weight:400">${meta.unit}</span>` : '';
+  const badgeHtml = pctBadge(currentVal, pred15);
+  const dot = dotClass(currentVal, pred15);
+  const hl = meta.highlight ? 'highlight' : '';
+  const pred15Disp = pred15 !== null ? fmt(pred15, meta.fmt) : '-';
+  const pred30Disp = pred30 !== null ? fmt(pred30, meta.fmt) : '-';
+
+  return `
+  <div class="card ${hl}">
+    <div class="card-dot ${dot}"></div>
+    <div class="card-label">${meta.label}</div>
+    <div class="card-value">${displayVal}${unit}</div>
+    <div class="card-badges">${badgeHtml || '<span class="badge-abs">-</span>'}</div>
+    <div class="card-pred-label">15분/30분 예측</div>
+    <div style="font-size:14px; font-weight:600; color:${hl ? '#bfdbfe' : '#374151'}">15분: ${pred15Disp}${meta.unit ? ' ' + meta.unit : ''}</div>
+    <div style="font-size:13px; font-weight:600; color:${hl ? '#bfdbfe' : '#374151'}">30분: ${pred30Disp}${meta.unit ? ' ' + meta.unit : ''}</div>
+  </div>`;
+}
+
+function renderPowerCard(label, currentVal, predVal, isAccum) {
+  const displayVal = currentVal !== null ? fmt(currentVal, 2) : '-';
+  const unit = `<span style="font-size:18px;font-weight:400">kW${isAccum ? 'h' : ''}</span>`;
+  const badgeHtml = isAccum ? '' : pctBadge(currentVal, predVal);
+  const dot = isAccum ? 'dot-none' : dotClass(currentVal, predVal);
+  const predDisp = predVal !== null ? fmt(predVal, 2) : '-';
+  const predLabel = isAccum ? '' : `
+    <div class="card-pred-label">15분 후 예측</div>
+    <div style="font-size:14px; font-weight:600; color:#374151">${predDisp} kW</div>`;
+
+  return `
+  <div class="card">
+    <div class="card-dot ${dot}"></div>
+    <div class="card-label">${label}</div>
+    <div class="card-value">${displayVal} ${unit}</div>
+    <div class="card-badges">${badgeHtml || '<span class="badge-abs">-</span>'}</div>
+    ${predLabel}
+  </div>`;
+}
+
+function renderDashboard(data) {
+  latestDashboardData = data;
+  const current = data.current_values || {};
+  const featPreds = data.feature_predictions || {};
+  const powerPred = data.power_prediction || {};
+
+  // ── 센서 카드 ──
+  let sensorHtml = '';
+  for (const [key, meta] of Object.entries(SENSOR_META)) {
+    const curVal = current[key] !== undefined ? current[key] : null;
+    const fp = featPreds[key];
+    const pred15 = fp ? fp.y_15_pred : null;
+    const pred30 = fp ? fp.y_30_pred : null;
+    sensorHtml += renderSensorCard(key, meta, curVal, pred15, pred30);
+  }
+  document.getElementById('sensorGrid').innerHTML = sensorHtml;
+
+  // ── API는 W/Wh, 화면 표시는 kW/kWh로 변환 ──
+  const instKw = data.instantaneous_power_w !== undefined && data.instantaneous_power_w !== null
+    ? Number(data.instantaneous_power_w) / 1000
+    : null;
+  const predInstKw = powerPred.y_15_pred !== undefined && powerPred.y_15_pred !== null
+    ? Number(powerPred.y_15_pred) / 1000
+    : null;
+  const dailyKwh = data.daily_energy_wh !== undefined && data.daily_energy_wh !== null
+    ? Number(data.daily_energy_wh) / 1000
+    : null;
+
+  let powerHtml = '';
+  powerHtml += renderPowerCard('순시 전력량(kW)', instKw, predInstKw, false);
+  powerHtml += renderPowerCard('일 누적 전력량(kWh)', dailyKwh, null, true);
+  document.getElementById('powerGrid').innerHTML = powerHtml;
+
+  renderTrendChart();
+}
+
+function renderTrendChart() {
+  const target = document.getElementById('trendFeature').value;
+  const data = latestDashboardData || {};
+  const hist = Array.isArray(data.recent_history) ? data.recent_history : [];
+
+  const xHist = [];
+  const yHist = [];
+  hist.forEach((r) => {
+    const t = r.timestamp;
+    const v = r[target];
+    if (!t) return;
+    if (v === null || v === undefined) return;
+    xHist.push(new Date(t));
+    yHist.push(Number(v));
+  });
+
+  const powerPred = data.power_prediction || {};
+  const featurePreds = data.feature_predictions || {};
+
+  let pred15 = null;
+  let pred30 = null;
+  if (target === 'CURVOLTAGE') {
+    pred15 = powerPred.y_15_pred;
+    pred30 = powerPred.y_30_pred;
+  } else {
+    const fp = featurePreds[target] || {};
+    pred15 = fp.y_15_pred;
+    pred30 = fp.y_30_pred;
+  }
+
+  const baseTime = xHist.length ? xHist[xHist.length - 1] : new Date();
+  const xPred15 = new Date(baseTime.getTime() + 15 * 60 * 1000);
+  const xPred30 = new Date(baseTime.getTime() + 30 * 60 * 1000);
+
+  const traces = [
+    {
+      type: 'scatter',
+      mode: 'lines+markers',
+      name: '최근 1시간',
+      x: xHist,
+      y: yHist,
+      line: { color: '#2563eb', width: 2.5 },
+      marker: { size: 6 },
+    },
+  ];
+
+  if (xHist.length && pred15 !== null && pred15 !== undefined) {
+    traces.push({
+      type: 'scatter',
+      mode: 'lines+markers',
+      name: '예측 (15/30분)',
+      x: pred30 !== null && pred30 !== undefined ? [baseTime, xPred15, xPred30] : [baseTime, xPred15],
+      y: pred30 !== null && pred30 !== undefined ? [yHist[yHist.length - 1], Number(pred15), Number(pred30)] : [yHist[yHist.length - 1], Number(pred15)],
+      line: { color: '#ef4444', width: 2, dash: 'dash' },
+      marker: { size: 7, symbol: 'diamond' },
+    });
+  }
+
+  const layout = {
+    margin: { l: 50, r: 20, t: 20, b: 40 },
+    xaxis: { title: '시간' },
+    yaxis: { title: target },
+    legend: { orientation: 'h' },
+    paper_bgcolor: '#fff',
+    plot_bgcolor: '#fff',
+  };
+
+  Plotly.react('trendChart', traces, layout, { responsive: true, displayModeBar: false });
+}
+
+// ────────────────────────────────────────
+// Enter 키 조회
+// ────────────────────────────────────────
+document.getElementById('deviceId').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') fetchDashboard();
+});
+
+document.getElementById('trendFeature').addEventListener('change', function() {
+  renderTrendChart();
+});
+</script>
+</body>
+</html>

@@ -107,27 +107,27 @@ curl -X POST "http://localhost:8000/api/optimize/milp-test" \
 
 ---
 
-### POST `/api/optimize/peak-dispatch-test`
+### POST `/api/optimize/peak-dispatch`
 목적: 회사별 장비 부하 분배로 15/30분 피크를 낮추는 MILP 실행
 
 Request Body
   - `lookback_hours` (int, default=`24`)
-  - `customer_name` (string, optional)
+  - `customer_id` (string, optional)
   - `idle_op_status_threshold` (float, default=`0.05`)
 
 Response (요약)
-  - 피크 전/후: `peak_15_before/after`, `peak_30_before/after`
+  - 피크 절감량: `peak_15_reduction`, `peak_15_reduction_pct`, `peak_30_reduction`, `peak_30_reduction_pct`
   - 장비 그룹: `donor_device_ids`, `idle_device_ids`, `skipped_devices`
   - 분배 결과: `allocation_plan`, `devices`(장비별 shift/slack 포함)
   - `objective_peak_sum`, `total_slack`, `success`, `status`, `message`
 
 예시:
 ```bash
-curl -X POST "http://localhost:8000/api/optimize/peak-dispatch-test" \
+curl -X POST "http://localhost:8000/api/optimize/peak-dispatch" \
   -H "Content-Type: application/json" \
   -d '{
     "lookback_hours": 24,
-    "customer_name": "우일금속(주)",
+    "customer_id": "c3af7a38-2e25-4159-8a5a-77fa3eebf4d4",
     "idle_op_status_threshold": 0.05
   }'
 ```
@@ -138,7 +138,7 @@ curl -X POST "http://localhost:8000/api/optimize/peak-dispatch-test" \
 1. `GET /api/simulate/devices`로 장비 목록 확인
 2. `GET /api/simulate/template/{device_id}`로 기준값 로드
 3. `POST /api/simulate/predict`로 override 시뮬레이션 실행
-4. `POST /api/optimize/peak-dispatch-test`로 분배 최적화 실행
+4. `POST /api/optimize/peak-dispatch`로 분배 최적화 실행
 
 ## 4) 참고
 - 웹 페이지

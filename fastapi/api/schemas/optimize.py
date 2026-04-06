@@ -2,7 +2,7 @@
 
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class MilpTestRequest(BaseModel):
@@ -16,6 +16,8 @@ class MilpTestRequest(BaseModel):
 
 class PeakDispatchRequest(BaseModel):
     """피크 분배 MILP 테스트 요청 스키마."""
-    lookback_hours: int = Field(24, ge=1, description="예측/OP_STATUS 조회 기간(시간)")
-    customer_name: Optional[str] = Field(None, description="대상 회사명(CUSTOMER_NAME)")
+    model_config = ConfigDict(extra="forbid")
+
+    lookback_hours: int = Field(24, ge=1, le=24 * 31, description="예측/OP_STATUS 조회 기간(시간, 1~744)")
+    customer_id: Optional[str] = Field(None, description="대상 회사 ID(CUSTOMER_ID)")
     idle_op_status_threshold: float = Field(0.05, ge=0.0, le=1.0, description="미가동 판단 OP_STATUS 평균 임계치")

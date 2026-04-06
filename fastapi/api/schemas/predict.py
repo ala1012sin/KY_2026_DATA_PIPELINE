@@ -14,5 +14,4 @@ class PredictRequest(BaseModel):
 class MultiPredictRequest(BaseModel):
     """여러 장비 자동 예측 요청 스키마."""
     device_ids: List[str] = Field(..., description="예측할 장비 ID 목록")
-    lookback_hours: int = Field(24, description="조회 기간(시간)")
-    max_data_age_hours: int = Field(24, description="허용 데이터 신선도(시간)")
+    lookback_hours: int = Field(24, ge=1, le=24 * 31, description="조회 기간(시간, 1~744)")

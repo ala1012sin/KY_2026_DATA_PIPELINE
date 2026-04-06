@@ -43,6 +43,7 @@ def fetch_pems_pro_log_df(
     start_dt: datetime,
     end_dt: datetime,
     device_ids: Optional[Sequence[str]] = None,
+    log_id_snapshot: Optional[Dict[str, int]] = None,
     db: Optional[Session] = None,
 ) -> pd.DataFrame:
     """TB_PEMS_PRO_LOG를 조회해 학습/서빙 공통 스키마 DataFrame으로 반환한다."""
@@ -95,6 +96,22 @@ def fetch_pems_pro_log_df(
             }
             for row in rows
         ]
+
+        # 동일 기준시각 재요청 시 입력 스냅샷을 고정하기 위한 LOG_ID 상한 필터
+        if log_id_snapshot:
+            filtered_records = []
+            for rec in records:
+                did = str(rec.get("DEVICE_ID"))
+                ceiling = log_id_snapshot.get(did)
+                if ceiling is None:
+                    continue
+                if int(rec.get("LOG_ID") or 0) <= int(ceiling):
+                    filtered_records.append(rec)
+            records = filtered_records
+
+        if not records:
+            raise DataNotFoundError("선택한 장비/기간에 TB_PEMS_PRO_LOG 데이터가 없습니다")
+
         return pd.DataFrame.from_records(records)
     except Exception:
         if session is not None:
@@ -110,6 +127,7 @@ def preprocess_pems_pro_from_db_in_memory(
     end_dt: datetime,
     pcfg: PreprocessConfig,
     device_ids: Optional[Sequence[str]] = None,
+    log_id_snapshot: Optional[Dict[str, int]] = None,
     db: Optional[Session] = None,
 ) -> Dict[str, Any]:
     """DB 조회부터 전처리까지 메모리에서 수행한다(CSV 파일 미생성)."""
@@ -118,6 +136,7 @@ def preprocess_pems_pro_from_db_in_memory(
         start_dt=start_dt,
         end_dt=end_dt,
         device_ids=device_ids,
+        log_id_snapshot=log_id_snapshot,
         db=db,
     )
     return preprocess_raw_df_to_supervised(raw=raw, pcfg=pcfg, persist_outputs=False)

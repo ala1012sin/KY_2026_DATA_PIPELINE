@@ -440,53 +440,17 @@
       `;
     }
 
-    async function computeAndRenderImpact(deviceId, lookback, overrides) {
-      const entries = Object.entries(overrides || {});
+    function renderImpactFromResponse(influenceMap) {
+      const entries = Object.entries(influenceMap || {});
       if (entries.length === 0) {
         renderImpactChart([], '변경된 입력값이 없어 영향도 계산을 건너뜁니다.');
         return;
       }
-
-      impactResultEl.innerHTML = '<div class="muted">영향도 계산 중...</div>';
-      const out = [];
-
-      for (const [field, value] of entries) {
-        try {
-          const body = {
-            device_id: deviceId,
-            lookback_hours: lookback,
-            base_timestamp: templateData?.base_timestamp || '',
-            base_log_id: templateData?.base_log_id ?? null,
-            overrides: { [field]: Number(value) },
-            // 영향도 계산용 단건 요청은 DB 로그를 남기지 않음
-            save_log: false,
-          };
-
-          const res = await fetch('/api/simulate/predict', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-          });
-          const data = await res.json();
-          if (!res.ok) continue;
-
-          const delta = data.delta || {};
-          const y15Pct = Number(delta.y_15_pct || 0);
-          const y30Pct = Number(delta.y_30_pct || 0);
-          const score = Math.max(
-            Math.abs(y15Pct),
-            Math.abs(y30Pct),
-          );
-          out.push({
-            field,
-            score,
-          });
-        } catch (_) {
-        }
-      }
-
-      out.sort((a, b) => b.score - a.score);
-      renderImpactChart(out.slice(0, 8), '영향도 계산에 사용할 결과가 없습니다.');
+      const items = entries
+        .map(([field, score]) => ({ field, score: Number(score || 0) }))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 8);
+      renderImpactChart(items, '영향도 계산에 사용할 결과가 없습니다.');
     }
 
     function clearResults() {
@@ -638,8 +602,6 @@
           base_timestamp: templateData?.base_timestamp || '',
           base_log_id: templateData?.base_log_id ?? null,
           overrides,
-          // 사용자가 실행 버튼을 누른 본 시뮬레이션만 DB 로그 저장
-          save_log: true,
         };
 
         const res = await fetch('/api/simulate/predict', {
@@ -654,7 +616,7 @@
         renderPredictSummary(simulatedResultEl, data.simulated || {});
         renderDeltaSummary(deltaResultEl, data.delta || null);
         renderCompareChart(data.baseline || {}, data.simulated || {});
-        await computeAndRenderImpact(deviceId, lookback, overrides);
+        renderImpactFromResponse(data.input_influence || {});
       } catch (e) {
         if (isNoDataErrorMessage(e?.message)) {
           openAlertModal('선택한 장비/기간에 데이터가 없습니다', true);

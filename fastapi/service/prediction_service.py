@@ -277,6 +277,8 @@ def build_simulation_template(device_id: str, lookback_hours: int = 24) -> Dict[
     # 시뮬레이션 시작 시점에 필요한 기준 정보(기준행/기준예측/수정가능필드) 구성
     if lookback_hours <= 0:
         raise HTTPException(status_code=400, detail="lookback_hours는 1 이상이어야 합니다")
+    if lookback_hours > 24 * 31:
+        raise HTTPException(status_code=400, detail="lookback_hours가 너무 큽니다(최대 744시간)")
 
     try:
         runner = store.get_runner(device_id)
@@ -326,6 +328,8 @@ def run_simulation(
     # 기준행 기반 override를 적용하고 baseline/simulated를 같은 조건으로 비교
     if lookback_hours <= 0:
         raise HTTPException(status_code=400, detail="lookback_hours는 1 이상이어야 합니다")
+    if lookback_hours > 24 * 31:
+        raise HTTPException(status_code=400, detail="lookback_hours가 너무 큽니다(최대 744시간)")
 
     base_dt = parse_base_timestamp(base_timestamp)
     start_dt = base_dt - timedelta(hours=lookback_hours)
@@ -421,6 +425,31 @@ def run_simulation(
     y30_base = float(base_pred.get("y_30_pred", 0.0))
     y15_sim = float(sim_pred.get("y_15_pred", 0.0))
     y30_sim = float(sim_pred.get("y_30_pred", 0.0))
+
+    # 입력 영향도: 변경된 각 필드별로 단일 override 예측을 수행해 변화율 산출
+    input_influence: Dict[str, float] = {}
+    if effective_overrides:
+        for _field, _value in effective_overrides.items():
+            try:
+                _single_raw = baseline_raw.copy()
+                _single_raw.loc[bin_mask, _field] = _value
+                _sm = preprocess_raw_df_to_supervised(raw=_single_raw, pcfg=pcfg, persist_outputs=False)
+                _sp = predict_from_preprocessed(
+                    device_id=device_id,
+                    runner=runner,
+                    meta=_sm,
+                    max_data_age_hours=24,
+                    enforce_freshness=False,
+                    reference_timestamp=target_ts,
+                )
+                _sp_pred = _sp["preds"][0] if _sp.get("preds") else {}
+                _y15 = float(_sp_pred.get("y_15_pred", 0.0))
+                _y30 = float(_sp_pred.get("y_30_pred", 0.0))
+                _pct15 = 0.0 if y15_base == 0 else (_y15 - y15_base) / abs(y15_base) * 100.0
+                _pct30 = 0.0 if y30_base == 0 else (_y30 - y30_base) / abs(y30_base) * 100.0
+                input_influence[_field] = round(max(abs(_pct15), abs(_pct30)), 4)
+            except Exception:
+                input_influence[_field] = 0.0
 
     # DB RESULT_VALUE(JSONB) 스키마에 맞춰 baseline/simulated/delta를 구성
     result_value = {
@@ -532,4 +561,5 @@ def run_simulation(
         "baseline": baseline,
         "simulated": simulated,
         "delta": result_value["delta"],
+        "input_influence": input_influence,
     }

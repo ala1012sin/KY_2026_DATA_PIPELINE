@@ -2,6 +2,7 @@
 
 import json
 import time
+import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -9,11 +10,13 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import pandas as pd
 from scipy.optimize import Bounds, LinearConstraint, milp
+from sqlalchemy import func
 
 from Logger import Logger as logger
 from db.public.models import (
     TB_CUSTOMER,
     TB_DEVICE,
+    TB_PEMS_PRO_LOG,
     TB_PEAK_DISPATCH_DEVICE_RESULT,
     TB_PEAK_DISPATCH_RUN,
 )
@@ -27,6 +30,98 @@ from service.prediction_service import (
 )
 from service.processing.config import PreprocessConfig
 from service.processing.pipeline import fetch_pems_pro_log_df, preprocess_pems_pro_from_db_in_memory
+
+
+_MILP_TIME_BUCKET_MINUTES = 5
+_FINALIZED_WINDOW_MINUTES = 15
+_SINGLE_DEVICE_ENTER_MARGIN_RATIO = 0.03
+_SINGLE_DEVICE_EXIT_MARGIN_RATIO = 0.01
+_SINGLE_DEVICE_HOLD_MINUTES = 15
+_LOG_ID_SNAPSHOT_CACHE: Dict[Any, Dict[str, int]] = {}
+_MILP_INPUT_CACHE: Dict[Any, Dict[str, Any]] = {}
+
+
+def _floor_time(dt: datetime, bucket_minutes: int) -> datetime:
+    if bucket_minutes <= 0:
+        return dt.replace(second=0, microsecond=0)
+    minute = (dt.minute // bucket_minutes) * bucket_minutes
+    return dt.replace(minute=minute, second=0, microsecond=0)
+
+
+def _finalized_end_dt(reference_dt: datetime) -> datetime:
+    """아직 집계가 완료되지 않은 현재 15분 구간은 제외한다."""
+    return _floor_time(reference_dt, _FINALIZED_WINDOW_MINUTES) - timedelta(seconds=1)
+
+
+def _get_or_create_log_id_snapshot(device_ids: List[str], end_dt: datetime) -> Dict[str, int]:
+    """같은 확정 구간에서는 동일한 LOG_ID 상한 스냅샷을 재사용한다."""
+    normalized = tuple(sorted(str(x) for x in device_ids if x))
+    cache_key = (end_dt.isoformat(), normalized)
+    cached = _LOG_ID_SNAPSHOT_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    if not normalized:
+        _LOG_ID_SNAPSHOT_CACHE[cache_key] = {}
+        return {}
+
+    db_gen = db_connection_pool()
+    db = next(db_gen)
+    try:
+        uuid_ids = [uuid.UUID(x) for x in normalized]
+        rows = (
+            db.query(TB_PEMS_PRO_LOG.device_id, func.max(TB_PEMS_PRO_LOG.log_id))
+            .filter(TB_PEMS_PRO_LOG.device_id.in_(uuid_ids))
+            .filter(TB_PEMS_PRO_LOG.log_dt <= end_dt)
+            .group_by(TB_PEMS_PRO_LOG.device_id)
+            .all()
+        )
+
+        snapshot: Dict[str, int] = {str(did): int(max_id) for did, max_id in rows if max_id is not None}
+        _LOG_ID_SNAPSHOT_CACHE[cache_key] = snapshot
+        return snapshot
+    finally:
+        try:
+            next(db_gen)
+        except StopIteration:
+            pass
+
+
+def _get_or_create_milp_inputs(
+    device_ids: List[str],
+    lookback_hours: int,
+    anchor_dt: datetime,
+) -> Dict[str, Any]:
+    """같은 확정 구간에서는 예측/운전상태 입력을 재사용해 결과 흔들림을 줄인다."""
+    normalized = tuple(sorted(str(x) for x in device_ids if x))
+    finalized_end = _finalized_end_dt(anchor_dt)
+    cache_key = (finalized_end.isoformat(), int(lookback_hours), normalized)
+
+    cached = _MILP_INPUT_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    snapshot = _get_or_create_log_id_snapshot(list(normalized), finalized_end)
+    pred_map, pred_failed = _predict_devices_batched(
+        device_ids=list(normalized),
+        lookback_hours=lookback_hours,
+        reference_dt=anchor_dt,
+        log_id_snapshot=snapshot,
+    )
+    op_mean_map = _mean_op_status_by_device(
+        device_ids=list(normalized),
+        lookback_hours=lookback_hours,
+        reference_dt=anchor_dt,
+        log_id_snapshot=snapshot,
+    )
+
+    data = {
+        "pred_map": pred_map,
+        "pred_failed": pred_failed,
+        "op_mean_map": op_mean_map,
+    }
+    _MILP_INPUT_CACHE[cache_key] = data
+    return data
 
 
 def solve_test_milp(
@@ -141,14 +236,25 @@ def _load_device_threshold(device_id: str) -> Optional[float]:
         return None
 
 
-def _mean_op_status_by_device(device_ids: List[str], lookback_hours: int) -> Dict[str, float]:
+def _mean_op_status_by_device(
+    device_ids: List[str],
+    lookback_hours: int,
+    reference_dt: Optional[datetime] = None,
+    log_id_snapshot: Optional[Dict[str, int]] = None,
+) -> Dict[str, float]:
     """최근 lookback 구간의 장비별 평균 OP_STATUS를 계산한다."""
     if not device_ids:
         return {}
 
-    end_dt = datetime.now()
+    anchor_dt = reference_dt or datetime.now()
+    end_dt = _finalized_end_dt(anchor_dt)
     start_dt = end_dt - timedelta(hours=lookback_hours)
-    raw = fetch_pems_pro_log_df(start_dt=start_dt, end_dt=end_dt, device_ids=device_ids)
+    raw = fetch_pems_pro_log_df(
+        start_dt=start_dt,
+        end_dt=end_dt,
+        device_ids=device_ids,
+        log_id_snapshot=log_id_snapshot,
+    )
     if raw.empty or "DEVICE_ID" not in raw.columns or "OP_STATUS" not in raw.columns:
         return {}
 
@@ -274,15 +380,82 @@ def _build_single_device_fsd_text(device_row: Dict[str, Any]) -> str:
     return "\n".join(recs)
 
 
+def _load_last_device_dispatch_state(device_id: str) -> Optional[Dict[str, Any]]:
+    """장비의 직전 피크 분배 실행 상태를 조회한다."""
+    db_gen = db_connection_pool()
+    db = next(db_gen)
+    try:
+        row = (
+            db.query(
+                TB_PEAK_DISPATCH_DEVICE_RESULT.required_shift_15,
+                TB_PEAK_DISPATCH_DEVICE_RESULT.required_shift_30,
+                TB_PEAK_DISPATCH_RUN.created_at,
+            )
+            .join(TB_PEAK_DISPATCH_RUN, TB_PEAK_DISPATCH_RUN.peak_run_id == TB_PEAK_DISPATCH_DEVICE_RESULT.peak_run_id)
+            .filter(TB_PEAK_DISPATCH_DEVICE_RESULT.device_id == device_id)
+            .order_by(TB_PEAK_DISPATCH_RUN.created_at.desc())
+            .first()
+        )
+        if not row:
+            return None
+
+        req15, req30, created_at = row
+        return {
+            "required_shift_15": float(req15 or 0.0),
+            "required_shift_30": float(req30 or 0.0),
+            "created_at": created_at,
+        }
+    finally:
+        try:
+            next(db_gen)
+        except StopIteration:
+            pass
+
+
+def _stable_single_device_shift(
+    base: float,
+    threshold: float,
+    prev_required_shift: float,
+    prev_created_at: Optional[datetime],
+    reference_dt: datetime,
+) -> float:
+    """단일 장비 권고가 경계값 부근에서 급변하지 않도록 진입/해제 기준을 분리한다."""
+    raw_required = max(0.0, float(base) - float(threshold))
+    enter_line = float(threshold) * (1.0 + _SINGLE_DEVICE_ENTER_MARGIN_RATIO)
+    exit_line = float(threshold) * (1.0 + _SINGLE_DEVICE_EXIT_MARGIN_RATIO)
+
+    prev_active = float(prev_required_shift or 0.0) > 1e-9
+    within_hold = False
+    if prev_created_at is not None:
+        prev_ts = prev_created_at
+        if getattr(prev_ts, "tzinfo", None) is not None:
+            prev_ts = prev_ts.astimezone().replace(tzinfo=None)
+        within_hold = (reference_dt - prev_ts) <= timedelta(minutes=_SINGLE_DEVICE_HOLD_MINUTES)
+
+    if prev_active:
+        if float(base) > exit_line:
+            return raw_required
+        if within_hold and float(base) > float(threshold):
+            return raw_required
+        return 0.0
+
+    if float(base) > enter_line:
+        return raw_required
+    return 0.0
+
+
 def _predict_devices_batched(
     device_ids: List[str],
     lookback_hours: int,
+    reference_dt: Optional[datetime] = None,
+    log_id_snapshot: Optional[Dict[str, int]] = None,
 ) -> (Dict[str, Dict[str, Any]], Dict[str, str]):
     """장비별 예측을 위한 전처리를 1회만 수행하고, 장비별로 추론을 분리 실행한다."""
     if not device_ids:
         return {}, {}
 
-    end_dt = datetime.now()
+    anchor_dt = reference_dt or datetime.now()
+    end_dt = _finalized_end_dt(anchor_dt)
     start_dt = end_dt - timedelta(hours=lookback_hours)
 
     meta = preprocess_pems_pro_from_db_in_memory(
@@ -290,6 +463,7 @@ def _predict_devices_batched(
         end_dt=end_dt,
         pcfg=PreprocessConfig(),
         device_ids=device_ids,
+        log_id_snapshot=log_id_snapshot,
     )
 
     output: Dict[str, Dict[str, Any]] = {}
@@ -429,6 +603,9 @@ def _optimize_company_group(
     records: List[Dict[str, Any]],
     lookback_hours: int,
     idle_op_status_threshold: float,
+    reference_dt: Optional[datetime] = None,
+    log_id_snapshot: Optional[Dict[str, int]] = None,
+    op_mean_map: Optional[Dict[str, float]] = None,
 ) -> Dict[str, Any]:
     """회사(고객) 단위로 피크 분배를 수행한다. 단일 장비면 FSD 감산 권고로 대체한다."""
     if not records:
@@ -441,7 +618,14 @@ def _optimize_company_group(
             "total_slack": 0.0,
         }
 
-    op_mean_map = _mean_op_status_by_device([r["device_id"] for r in records], lookback_hours=lookback_hours)
+    anchor_dt = reference_dt or datetime.now()
+    if op_mean_map is None:
+        op_mean_map = _mean_op_status_by_device(
+            [r["device_id"] for r in records],
+            lookback_hours=lookback_hours,
+            reference_dt=anchor_dt,
+            log_id_snapshot=log_id_snapshot,
+        )
     for row in records:
         op_mean = float(op_mean_map.get(row["device_id"], 0.0))
         row["op_status_mean"] = op_mean
@@ -453,8 +637,25 @@ def _optimize_company_group(
         base15 = float(row["p15"])
         base30 = float(row["p30"])
         threshold = float(row["threshold"])
-        required15 = max(0.0, base15 - threshold)
-        required30 = max(0.0, base30 - threshold)
+        prev_state = _load_last_device_dispatch_state(row["device_id"])
+        prev_req15 = float((prev_state or {}).get("required_shift_15", 0.0))
+        prev_req30 = float((prev_state or {}).get("required_shift_30", 0.0))
+        prev_created_at = (prev_state or {}).get("created_at")
+
+        required15 = _stable_single_device_shift(
+            base=base15,
+            threshold=threshold,
+            prev_required_shift=prev_req15,
+            prev_created_at=prev_created_at,
+            reference_dt=anchor_dt,
+        )
+        required30 = _stable_single_device_shift(
+            base=base30,
+            threshold=threshold,
+            prev_required_shift=prev_req30,
+            prev_created_at=prev_created_at,
+            reference_dt=anchor_dt,
+        )
 
         device_out = {
             "device_id": row["device_id"],
@@ -733,7 +934,7 @@ def _optimize_company_group(
 
 def optimize_peak_dispatch_test(
     lookback_hours: int = 24,
-    customer_name: Optional[str] = None,
+    customer_id: Optional[str] = None,
     idle_op_status_threshold: float = 0.05,
 ) -> Dict[str, Any]:
     """회사별로 장비를 나눠 피크 분배를 수행한다(단일 장비 회사는 FSD 감산 권고)."""
@@ -741,6 +942,8 @@ def optimize_peak_dispatch_test(
 
     if lookback_hours <= 0:
         raise ValueError("lookback_hours는 1 이상이어야 합니다")
+    if lookback_hours > 24 * 31:
+        raise ValueError("lookback_hours가 너무 큽니다(최대 744시간)")
     if idle_op_status_threshold < 0 or idle_op_status_threshold > 1:
         raise ValueError("idle_op_status_threshold는 0~1 범위여야 합니다")
 
@@ -750,6 +953,7 @@ def optimize_peak_dispatch_test(
 
     records: List[Dict[str, Any]] = []
     skipped: List[Dict[str, str]] = []
+    anchor_dt = _floor_time(datetime.now(), _MILP_TIME_BUCKET_MINUTES)
 
     threshold_start = time.perf_counter()
     threshold_map: Dict[str, float] = {}
@@ -759,21 +963,21 @@ def optimize_peak_dispatch_test(
             skipped.append({"device_id": device_id, "reason": "threshold 없음"})
             continue
         threshold_map[device_id] = float(threshold)
+
+    milp_inputs = _get_or_create_milp_inputs(
+        device_ids=list(threshold_map.keys()),
+        lookback_hours=lookback_hours,
+        anchor_dt=anchor_dt,
+    )
+    pred_map = milp_inputs.get("pred_map", {})
+    pred_failed = milp_inputs.get("pred_failed", {})
+    op_mean_map = milp_inputs.get("op_mean_map", {})
     logger.info(
         f"[MILP] threshold stage done: eligible={len(threshold_map)}, skipped={len(skipped)}, "
         f"elapsed={time.perf_counter() - threshold_start:.2f}s"
     )
 
     predict_start = time.perf_counter()
-    pred_map: Dict[str, Dict[str, Any]] = {}
-    pred_failed: Dict[str, str] = {}
-    try:
-        pred_map, pred_failed = _predict_devices_batched(
-            device_ids=list(threshold_map.keys()),
-            lookback_hours=lookback_hours,
-        )
-    except Exception as e:
-        logger.warning(f"[MILP] batch prediction failed: {e}")
 
     company_map = _load_device_company_map(list(threshold_map.keys()))
 
@@ -813,15 +1017,15 @@ def optimize_peak_dispatch_test(
         f"elapsed={time.perf_counter() - predict_start:.2f}s"
     )
 
-    selected_customer_name = (customer_name or "").strip()
-    if selected_customer_name:
-        normalized_target = selected_customer_name.casefold()
+    selected_customer_id = (customer_id or "").strip()
+    if selected_customer_id:
+        normalized_target = selected_customer_id.casefold()
         records = [
             r for r in records
-            if str(r.get("company_name") or "").strip().casefold() == normalized_target
+            if str(r.get("customer_id") or "").strip().casefold() == normalized_target
         ]
         if not records:
-            raise ValueError(f"입력한 CUSTOMER_NAME에 해당하는 장비를 찾을 수 없습니다: {selected_customer_name}")
+            raise ValueError(f"입력한 CUSTOMER_ID에 해당하는 장비를 찾을 수 없습니다: {selected_customer_id}")
 
     if len(records) < 1:
         raise ValueError("최적화 가능한 장비가 없습니다")
@@ -845,6 +1049,8 @@ def optimize_peak_dispatch_test(
             records=[dict(r) for r in rows],
             lookback_hours=lookback_hours,
             idle_op_status_threshold=idle_op_status_threshold,
+            reference_dt=anchor_dt,
+            op_mean_map=op_mean_map,
         )
 
         for d in group_result["devices"]:
@@ -880,8 +1086,8 @@ def optimize_peak_dispatch_test(
         "success": True,
         "message": (
             f"회사별 최적화 완료({len(company_summaries)}개 회사)"
-            if not selected_customer_name
-            else f"{selected_customer_name} 회사 최적화 완료"
+            if not selected_customer_id
+            else f"{selected_customer_id} 회사 최적화 완료"
         ),
         "lookback_hours": int(lookback_hours),
         "idle_op_status_threshold": float(idle_op_status_threshold),
@@ -900,6 +1106,63 @@ def optimize_peak_dispatch_test(
         "company_summaries": company_summaries,
     }
 
+    # 웹 대시보드가 실제로 사용하는 필드만 추려 경량 응답으로 반환
+    slim_allocation_plan = [
+        {
+            "minute": int(a.get("minute", 0)),
+            "from_device_id": a.get("from_device_id"),
+            "to_device_id": a.get("to_device_id"),
+            "power_w": float(a.get("power_w", 0.0)),
+        }
+        for a in allocation_plan
+    ]
+
+    slim_devices = [
+        {
+            "device_id": str(d.get("device_id")),
+            "is_donor": bool(d.get("is_donor", False)),
+            "threshold": float(d.get("threshold", 0.0)),
+            "baseline_15": float(d.get("baseline_15", 0.0)),
+            "baseline_30": float(d.get("baseline_30", 0.0)),
+            "shift_out_15": float(d.get("shift_out_15", 0.0)),
+            "shift_out_30": float(d.get("shift_out_30", 0.0)),
+            "distribution_text": d.get("distribution_text"),
+        }
+        for d in devices_out
+    ]
+
+    slim_payload = {
+        "status": str(result_payload.get("status", "unknown")),
+        "success": bool(result_payload.get("success", False)),
+        "message": result_payload.get("message"),
+        "device_count": int(result_payload.get("device_count", 0)),
+        "donor_device_ids": result_payload.get("donor_device_ids") or [],
+        "idle_device_ids": result_payload.get("idle_device_ids") or [],
+        "peak_15_reduction": float(result_payload.get("peak_15_before", 0.0)) - float(result_payload.get("peak_15_after", 0.0)),
+        "peak_15_reduction_pct": (
+            0.0
+            if float(result_payload.get("peak_15_before", 0.0)) == 0.0
+            else (
+                (float(result_payload.get("peak_15_before", 0.0)) - float(result_payload.get("peak_15_after", 0.0)))
+                / float(result_payload.get("peak_15_before", 0.0))
+                * 100.0
+            )
+        ),
+        "peak_30_reduction": float(result_payload.get("peak_30_before", 0.0)) - float(result_payload.get("peak_30_after", 0.0)),
+        "peak_30_reduction_pct": (
+            0.0
+            if float(result_payload.get("peak_30_before", 0.0)) == 0.0
+            else (
+                (float(result_payload.get("peak_30_before", 0.0)) - float(result_payload.get("peak_30_after", 0.0)))
+                / float(result_payload.get("peak_30_before", 0.0))
+                * 100.0
+            )
+        ),
+        "allocation_plan": slim_allocation_plan,
+        "devices": slim_devices,
+        "skipped_devices": result_payload.get("skipped_devices") or [],
+    }
+
     # 회사 매핑 정보가 아직 없더라도 실행/결과는 항상 저장한다.
     try:
         _save_peak_dispatch_result(result_payload=result_payload, customer_id=None)
@@ -907,4 +1170,4 @@ def optimize_peak_dispatch_test(
         logger.error(f"[MILP] 피크 분배 결과 저장 실패: {e}")
 
     logger.info(f"[MILP] total elapsed={time.perf_counter() - total_start:.2f}s")
-    return result_payload
+    return slim_payload

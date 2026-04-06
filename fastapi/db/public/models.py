@@ -48,6 +48,7 @@ class TB_DEVICE(Base):
     mg_refill_set_time = Column(DateTime, name='MG_REFILL_SET_TIME', nullable=True)
     horse_power = Column(Integer, name='HORSE_POWER', nullable=True)
     data_type = Column(Integer, name='DATA_TYPE', nullable=True)
+    device_name = Column(String(100), name='DEVICE_NAME', nullable=True)
 
     # Relationships
     customer = relationship("TB_CUSTOMER", back_populates="devices")

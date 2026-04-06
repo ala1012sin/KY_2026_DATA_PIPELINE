@@ -331,3 +331,42 @@ class ModelStore:
 
     def clear_cache(self):
         self.get_runner.cache_clear()
+
+
+def _resolve_feature_model_root() -> str:
+    env = os.environ.get("FEATURE_MODEL_ROOT")
+    if env:
+        return str(Path(env).expanduser().resolve())
+    return str(Path("./ai_models/feature").resolve())
+
+
+class FeatureModelStore:
+    """
+    ai_models/feature/{feature_name}/device={device_id}/best_model/ 구조에서
+    피처별 모델 러너를 로드·캐시하는 스토어.
+    """
+
+    def __init__(self, feature_root: str):
+        self.feature_root = str(Path(feature_root).resolve())
+
+    def list_features(self) -> List[str]:
+        """feature_root 아래 존재하는 피처 폴더 목록을 반환."""
+        p = Path(self.feature_root)
+        if not p.exists():
+            return []
+        return sorted([d.name for d in p.iterdir() if d.is_dir()])
+
+    def _device_dir(self, feature: str, device_id: str) -> str:
+        return os.path.join(self.feature_root, feature, f"device={device_id}")
+
+    @lru_cache(maxsize=1024)
+    def get_runner(self, feature: str, device_id: str) -> BestModelRunner:
+        ddir = self._device_dir(feature, device_id)
+        if not os.path.exists(ddir):
+            raise FileNotFoundError(
+                f"feature model not found: feature={feature}, device={device_id}"
+            )
+        return BestModelRunner(ddir)
+
+    def clear_cache(self):
+        self.get_runner.cache_clear()

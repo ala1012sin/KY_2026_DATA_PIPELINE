@@ -14,6 +14,14 @@ class DevicePredictionResponse(BaseModel):
     base_timestamp: Optional[str] = None
 
 
+class SimulationDevicePredictionResponse(BaseModel):
+    """시뮬레이션용 장비 예측 응답 스키마(경량)."""
+    device_id: str
+    best_model: str
+    preds: List[Dict[str, Any]]
+    base_timestamp: Optional[str] = None
+
+
 class ManualPredictResponse(BaseModel):
     """수동 예측 응답 스키마."""
     device_id: str
@@ -22,6 +30,26 @@ class ManualPredictResponse(BaseModel):
     missing_feature_count: int
     missing_features: List[str] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
+
+
+class AutoPredictResponse(BaseModel):
+    """모니터링용 자동 예측 응답 스키마(경량)."""
+    device_id: str
+    best_model: str
+    preds: List[Dict[str, Any]]
+
+
+class FeaturePredItem(BaseModel):
+    """단일 피처의 15·30분 예측값."""
+    y_15_pred: float
+    y_30_pred: float
+
+
+class FeaturePredictResponse(BaseModel):
+    """피처별 예측 응답 스키마."""
+    device_id: str
+    best_model: str
+    preds: Dict[str, FeaturePredItem]
 
 
 class PredictBatchError(BaseModel):
@@ -36,7 +64,7 @@ class PredictBatchResponse(BaseModel):
     total: int
     success: int
     failed: int
-    results: List[DevicePredictionResponse] = Field(default_factory=list)
+    results: List[AutoPredictResponse] = Field(default_factory=list)
     errors: List[PredictBatchError] = Field(default_factory=list)
 
 
@@ -52,7 +80,7 @@ class SimulationTemplateResponse(BaseModel):
     base_timestamp: str
     base_log_id: Optional[int] = None
     editable_fields: Dict[str, Optional[float]] = Field(default_factory=dict)
-    baseline: DevicePredictionResponse
+    baseline: SimulationDevicePredictionResponse
 
 
 class SimulationPredictResponse(BaseModel):
@@ -60,9 +88,10 @@ class SimulationPredictResponse(BaseModel):
     device_id: str
     base_timestamp: str
     overrides: Dict[str, float] = Field(default_factory=dict)
-    baseline: DevicePredictionResponse
-    simulated: DevicePredictionResponse
+    baseline: SimulationDevicePredictionResponse
+    simulated: SimulationDevicePredictionResponse
     delta: Dict[str, float] = Field(default_factory=dict)
+    input_influence: Dict[str, float] = Field(default_factory=dict)
 
 
 class ModelInfoResponse(BaseModel):
@@ -103,35 +132,13 @@ class MilpTestResponse(BaseModel):
 class PeakDispatchDeviceResult(BaseModel):
     """장비별 피크 분배 결과 스키마."""
     device_id: str
-    customer_id: Optional[str] = None
-    company_name: Optional[str] = None
     is_donor: bool
-    is_idle: bool
-    op_status_mean: float
     threshold: float
     baseline_15: float
     baseline_30: float
-    optimized_15: float
-    optimized_30: float
-    delta_15: float
-    delta_30: float
-    shift_in_15: float
-    shift_in_30: float
     shift_out_15: float
     shift_out_30: float
-    required_shift_15: float
-    required_shift_30: float
-    distributed_targets_15: List[Dict[str, Any]] = Field(default_factory=list)
-    distributed_targets_30: List[Dict[str, Any]] = Field(default_factory=list)
     distribution_text: Optional[str] = None
-    slack_15: float
-    slack_30: float
-
-
-class PeakDispatchSkippedDevice(BaseModel):
-    """최적화 대상에서 제외된 장비 스키마."""
-    device_id: str
-    reason: str
 
 
 class PeakDispatchResponse(BaseModel):
@@ -139,21 +146,16 @@ class PeakDispatchResponse(BaseModel):
     status: str
     success: bool
     message: str
-    lookback_hours: int
-    idle_op_status_threshold: float
     device_count: int
     donor_device_ids: List[str] = Field(default_factory=list)
     idle_device_ids: List[str] = Field(default_factory=list)
-    peak_15_before: float
-    peak_15_after: float
-    peak_30_before: float
-    peak_30_after: float
-    objective_peak_sum: float
-    total_slack: float
+    peak_15_reduction: float
+    peak_15_reduction_pct: float
+    peak_30_reduction: float
+    peak_30_reduction_pct: float
     allocation_plan: List[Dict[str, Any]] = Field(default_factory=list)
     devices: List[PeakDispatchDeviceResult] = Field(default_factory=list)
-    skipped_devices: List[PeakDispatchSkippedDevice] = Field(default_factory=list)
-    company_summaries: List[Dict[str, Any]] = Field(default_factory=list)
+    skipped_devices: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class MonitoringDailyCount(BaseModel):

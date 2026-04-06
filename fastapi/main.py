@@ -83,6 +83,14 @@ def milp_page():
     return RedirectResponse(url="/docs")
 
 
+@app.get("/feature-dashboard", include_in_schema=False)
+def feature_dashboard_page():
+    html_path = WEB_DIR / "feature_dashboard.html"
+    if html_path.exists():
+        return FileResponse(str(html_path))
+    return RedirectResponse(url="/docs")
+
+
 async def _run_sensor_job(minutes: int = 1) -> None:
     # 최근 N분 구간을 기준으로 센서 배치 실행
     tz = ZoneInfo("Asia/Seoul")

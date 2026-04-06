@@ -47,7 +47,7 @@
   </style>
 </head>
 <body>
-  <h1>MILP 피크 분배 대시보드 (테스트)</h1>
+  <h1>MILP 피크 분배 대시보드</h1>
 
   <div class="card">
     <div class="row">
@@ -56,8 +56,8 @@
         <input id="lookback" type="number" value="24" min="1" />
       </div>
       <div class="field">
-        <label>회사명(CUSTOMER_NAME)</label>
-        <input id="customerName" type="text" placeholder="예: ABC컴퍼니" />
+        <label>회사 ID(CUSTOMER_ID)</label>
+        <input id="customerId" type="text" placeholder="예: c3af7a38-2e25-4159-8a5a-77fa3eebf4d4" />
       </div>
       <div class="field">
         <label>미가동 기준(OP_STATUS 평균 이하)</label>
@@ -106,7 +106,7 @@
 
   <script>
     const lookbackEl = document.getElementById('lookback');
-    const customerNameEl = document.getElementById('customerName');
+    const customerIdEl = document.getElementById('customerId');
     const idleThresholdEl = document.getElementById('idleThreshold');
     const btnRun = document.getElementById('btnRun');
     const statusTextEl = document.getElementById('statusText');
@@ -261,10 +261,10 @@
     }
 
     function renderSummary(data) {
-      const r15 = Number(data.peak_15_before || 0) - Number(data.peak_15_after || 0);
-      const r30 = Number(data.peak_30_before || 0) - Number(data.peak_30_after || 0);
-      const r15Pct = Number(data.peak_15_before || 0) === 0 ? 0 : (r15 / Number(data.peak_15_before)) * 100;
-      const r30Pct = Number(data.peak_30_before || 0) === 0 ? 0 : (r30 / Number(data.peak_30_before)) * 100;
+      const r15 = Number(data.peak_15_reduction || 0);
+      const r30 = Number(data.peak_30_reduction || 0);
+      const r15Pct = Number(data.peak_15_reduction_pct || 0);
+      const r30Pct = Number(data.peak_30_reduction_pct || 0);
 
       const items = [
         { k: '분석 장비 수', v: `${data.device_count}대` },
@@ -355,7 +355,7 @@
       if (btnRun.disabled) return;
 
       const lookback_hours = Number(lookbackEl.value || 24);
-      const customer_name = String(customerNameEl.value || '').trim();
+      const customer_id = String(customerIdEl.value || '').trim();
       const idle_op_status_threshold = Number(idleThresholdEl.value || 0.05);
 
       btnRun.disabled = true;
@@ -364,12 +364,12 @@
       loadingModalEl.classList.add('open');
 
       try {
-        const res = await fetch('/api/optimize/peak-dispatch-test', {
+        const res = await fetch('/api/optimize/peak-dispatch', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             lookback_hours,
-            customer_name: customer_name || null,
+            customer_id: customer_id || null,
             idle_op_status_threshold,
           }),
         });

@@ -9,8 +9,6 @@ class SimulatePredictRequest(BaseModel):
     """원본(raw) 값 변경 기반 시뮬레이션 요청 스키마."""
     device_id: str
     overrides: Dict[str, float] = Field(..., description="수정할 raw 컬럼 값")
-    lookback_hours: int = Field(24, description="조회 기간(시간)")
+    lookback_hours: int = Field(24, ge=1, le=24 * 31, description="조회 기간(시간, 1~744)")
     base_timestamp: str = Field("", description="기준 시각(ISO8601, 비우면 최신)")
     base_log_id: Optional[int] = Field(None, description="기준 행 LOG_ID")
-    # 프론트 호출 목적(실행/영향도 계산)에 따라 저장 여부를 제어
-    save_log: bool = Field(True, description="시뮬레이션 로그 저장 여부")
