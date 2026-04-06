@@ -402,18 +402,19 @@ function renderDashboard(data) {
 function renderTrendChart() {
   const target = document.getElementById('trendFeature').value;
   const data = latestDashboardData || {};
-  const hist = Array.isArray(data.recent_history) ? data.recent_history : [];
+  const historyMap = data.history_by_time || {};
 
   const xHist = [];
   const yHist = [];
-  hist.forEach((r) => {
-    const t = r.timestamp;
-    const v = r[target];
-    if (!t) return;
-    if (v === null || v === undefined) return;
-    xHist.push(new Date(t));
-    yHist.push(Number(v));
-  });
+  Object.keys(historyMap)
+    .sort()
+    .forEach((t) => {
+      const row = historyMap[t] || {};
+      const v = row[target];
+      if (v === null || v === undefined) return;
+      xHist.push(new Date(t));
+      yHist.push(Number(v));
+    });
 
   const powerPred = data.power_prediction || {};
   const featurePreds = data.feature_predictions || {};

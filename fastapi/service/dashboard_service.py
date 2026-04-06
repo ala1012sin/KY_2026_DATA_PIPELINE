@@ -97,6 +97,53 @@ def get_daily_energy_wh(device_id: str) -> float:
     return round(energy_wh, 4)
 
 
+def get_history_by_time(device_id: str, lookback_hours: int) -> Dict[str, Dict[str, Optional[float]]]:
+    """lookback 구간의 15분 리샘플 시계열을 {timestamp: {feature: value}}로 반환한다."""
+    end_dt = datetime.now()
+    start_dt = end_dt - timedelta(hours=lookback_hours)
+
+    try:
+        raw = fetch_pems_pro_log_df(start_dt=start_dt, end_dt=end_dt, device_ids=[device_id])
+    except DataNotFoundError:
+        return {}
+
+    raw = raw[raw["DEVICE_ID"].astype(str) == str(device_id)].copy()
+    if raw.empty:
+        return {}
+
+    pcfg = PreprocessConfig()
+    df15 = resample_15m_per_device(raw, "LOG_DT", "DEVICE_ID", pcfg.resample_rule, "none")
+    df15 = df15[df15["DEVICE_ID"].astype(str) == str(device_id)].copy()
+    df15 = df15[df15["n_obs"].fillna(0) > 0]
+    if df15.empty:
+        return {}
+
+    df15["LOG_DT"] = pd.to_datetime(df15["LOG_DT"], errors="coerce")
+    df15 = df15.dropna(subset=["LOG_DT"]).sort_values("LOG_DT")
+
+    def _safe(row: pd.Series, col: str) -> Optional[float]:
+        try:
+            v = float(row.get(col))
+            import math
+            return None if math.isnan(v) or math.isinf(v) else v
+        except Exception:
+            return None
+
+    out: Dict[str, Dict[str, Optional[float]]] = {}
+    for _, row in df15.iterrows():
+        ts = pd.Timestamp(row["LOG_DT"]).isoformat()
+        out[ts] = {
+            "CURVOLTAGE": _safe(row, "CUR_VOLTAGE"),
+            "PRESSURE": _safe(row, "PRESSURE"),
+            "TEMPERATURE": _safe(row, "TEMPERATURE"),
+            "HZ": _safe(row, "HZ"),
+            "AVGCURRENT": _safe(row, "AVGCURRENT"),
+            "AVGVOLTAGE": _safe(row, "AVGVOLTAGE"),
+            "FACTOR": _safe(row, "FACTOR"),
+        }
+    return out
+
+
 def get_dashboard_data(device_id: str, lookback_hours: int = 24) -> Dict[str, Any]:
     """대시보드에 필요한 모든 데이터를 한 번에 반환한다."""
     # 1) 현재 센서값
@@ -127,6 +174,9 @@ def get_dashboard_data(device_id: str, lookback_hours: int = 24) -> Dict[str, An
     current_power_w = current.get("CURVOLTAGE")
     instantaneous_w = round(current_power_w, 4) if current_power_w is not None else None
 
+    # 6) 과거 데이터 시계열(시간 -> 피처맵): 대시보드는 최근 2시간만 제공
+    history_by_time = get_history_by_time(device_id=device_id, lookback_hours=2)
+
     return {
         "device_id": device_id,
         "timestamp": datetime.now().isoformat(),
@@ -138,4 +188,5 @@ def get_dashboard_data(device_id: str, lookback_hours: int = 24) -> Dict[str, An
         },
         "instantaneous_power_w": instantaneous_w,
         "daily_energy_wh": daily_energy_wh,
+        "history_by_time": history_by_time,
     }

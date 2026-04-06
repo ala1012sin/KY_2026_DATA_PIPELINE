@@ -1,5 +1,5 @@
 {
-  "threshold_p95": 18316.427734375,
+  "threshold_p95": 10000.427734375,
   "threshold_meta": {
     "quantile": 0.95,
     "n_points": 2156,

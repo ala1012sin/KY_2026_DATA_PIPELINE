@@ -277,8 +277,8 @@ def _format_pct(value: float) -> str:
     return f"{float(value):.1f}"
 
 
-def _load_device_company_map(device_ids: List[str]) -> Dict[str, Dict[str, str]]:
-    """DEVICE_ID -> 회사/장비 정보(customer_id/customer_name/data_type/device_type)를 조회한다."""
+def _load_device_company_map(device_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+    """DEVICE_ID -> 회사/장비 정보(customer_id/customer_name/data_type/device_type/horse_power)를 조회한다."""
     if not device_ids:
         return {}
 
@@ -292,14 +292,15 @@ def _load_device_company_map(device_ids: List[str]) -> Dict[str, Dict[str, str]]
                 TB_CUSTOMER.customer_name,
                 TB_DEVICE.data_type,
                 TB_DEVICE.device_type,
+                TB_DEVICE.horse_power,
             )
             .outerjoin(TB_CUSTOMER, TB_CUSTOMER.customer_id == TB_DEVICE.customer_id)
             .filter(TB_DEVICE.device_id.in_(device_ids))
             .all()
         )
 
-        out: Dict[str, Dict[str, str]] = {}
-        for device_id, customer_id, customer_name, data_type, device_type in rows:
+        out: Dict[str, Dict[str, Any]] = {}
+        for device_id, customer_id, customer_name, data_type, device_type, horse_power in rows:
             dev = str(device_id)
             cid = str(customer_id) if customer_id is not None else "UNASSIGNED"
             cname = str(customer_name) if customer_name else cid
@@ -330,6 +331,7 @@ def _load_device_company_map(device_ids: List[str]) -> Dict[str, Dict[str, str]]
                 "data_type": dtype_num,
                 "device_type": dtype,
                 "drive_mode": drive_mode,
+                "horse_power": (None if horse_power is None else float(horse_power)),
             }
         return out
     finally:
@@ -343,6 +345,15 @@ def _build_single_device_fsd_text(device_row: Dict[str, Any]) -> str:
     """단일 장비 회사에서 사용할 감산 권고 문구를 생성한다."""
     recs: List[str] = []
     drive_mode = str(device_row.get("drive_mode") or "UNKNOWN").upper()
+    horse_power = device_row.get("horse_power")
+    max_power_w = None
+    try:
+        if horse_power is not None and float(horse_power) > 0:
+            # 요청 기준: 마력(HP) * 0.76(kW/HP) * 1000 = 최대 전력(W)
+            max_power_w = float(horse_power) * 0.76 * 1000.0
+    except Exception:
+        max_power_w = None
+
     horizons = [
         (15, float(device_row.get("baseline_15", 0.0)), float(device_row.get("threshold", 0.0)), float(device_row.get("required_shift_15", 0.0))),
         (30, float(device_row.get("baseline_30", 0.0)), float(device_row.get("threshold", 0.0)), float(device_row.get("required_shift_30", 0.0))),
@@ -352,12 +363,23 @@ def _build_single_device_fsd_text(device_row: Dict[str, Any]) -> str:
         if base <= 0 or required_shift <= 1e-9 or base <= threshold:
             continue
         if drive_mode == "VSD":
-            reduction_ratio = 20.0
-            keep_ratio = max(0.0, 100.0 - reduction_ratio)
-            recs.append(
-                f"{minute}분 후 예측이 임계치를 {_format_kw_from_w(base - threshold)}kW 초과합니다. "
-                f"VSD 장비 기준으로 부하율을 약 {_format_pct(reduction_ratio)}% 낮춰 {_format_pct(keep_ratio)}% 수준으로 운전하면 피크 완화가 가능합니다."
-            )
+            if max_power_w and max_power_w > 0:
+                current_ratio = max(0.0, min(100.0, (base / max_power_w) * 100.0))
+                target_ratio = max(0.0, min(100.0, ((base - required_shift) / max_power_w) * 100.0))
+                reduction_ratio = max(0.0, current_ratio - target_ratio)
+                recs.append(
+                    f"{minute}분 후 예측이 임계치를 {_format_kw_from_w(base - threshold)}kW 초과합니다. "
+                    f"VSD 장비(정격 약 {_format_kw_from_w(max_power_w)}kW) 기준 현재 부하율은 약 {_format_pct(current_ratio)}%이며, "
+                    f"피크 완화를 위해 부하율을 약 {_format_pct(reduction_ratio)}% 낮춰 {_format_pct(target_ratio)}% 수준으로 운전하는 것을 권고합니다."
+                )
+            else:
+                # 마력 정보가 없으면 기존 필요 감산 비율 기반으로 안내
+                reduction_ratio = min(100.0, max(0.0, (required_shift / base) * 100.0))
+                keep_ratio = max(0.0, 100.0 - reduction_ratio)
+                recs.append(
+                    f"{minute}분 후 예측이 임계치를 {_format_kw_from_w(base - threshold)}kW 초과합니다. "
+                    f"VSD 장비 기준으로 부하율을 약 {_format_pct(reduction_ratio)}% 낮춰 {_format_pct(keep_ratio)}% 수준으로 운전하면 피크 완화가 가능합니다."
+                )
             continue
 
         if drive_mode == "ON_OFF":
@@ -662,6 +684,7 @@ def _optimize_company_group(
             "company_name": row.get("company_name"),
             "customer_id": row.get("customer_id"),
             "drive_mode": row.get("drive_mode"),
+            "horse_power": row.get("horse_power"),
             "is_donor": True,
             "is_idle": bool(row["is_idle"]),
             "op_status_mean": float(row["op_status_mean"]),
@@ -1006,6 +1029,7 @@ def optimize_peak_dispatch_test(
                 "customer_id": company_info.get("customer_id"),
                 "company_name": company_info.get("company_name"),
                 "drive_mode": company_info.get("drive_mode", "UNKNOWN"),
+                "horse_power": company_info.get("horse_power"),
                 "threshold": float(threshold),
                 "p15": p15,
                 "p30": p30,
