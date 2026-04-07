@@ -1,0 +1,14 @@
+{
+  "threshold_p95": 25.71031041145324,
+  "threshold_meta": {
+    "quantile": 0.95,
+    "n_points": 9032,
+    "filters": {
+      "use_train_only": true,
+      "use_business_hour_only": false,
+      "use_op_true_only": true
+    },
+    "target_col": "AVGCURRENT",
+    "threshold": 25.71031041145324
+  }
+}

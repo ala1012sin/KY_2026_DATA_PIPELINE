@@ -1,0 +1,58 @@
+{
+  "winsor_lower_q": 0.01,
+  "winsor_upper_q": 1.0,
+  "winsor_bounds": {
+    "PRESSURE": {
+      "low": 0.0,
+      "high": 8.7
+    },
+    "TEMPERATURE": {
+      "low": 6.0,
+      "high": 84.0
+    },
+    "HZ": {
+      "low": 0.0,
+      "high": 15.0
+    },
+    "AVGVOLTAGE": {
+      "low": 382.01514099121107,
+      "high": 402.724884033203
+    },
+    "AVGCURRENT": {
+      "low": 0.4213288921117778,
+      "high": 60.1622009277344
+    },
+    "CUR_VOLTAGE": {
+      "low": 0.0,
+      "high": 39350.29296875
+    },
+    "n_obs": {
+      "low": 1.0,
+      "high": 3.0
+    },
+    "gap_prev_obs_bins": {
+      "low": 0.0,
+      "high": 543.0
+    },
+    "session_pos": {
+      "low": 3.0,
+      "high": 898.0
+    },
+    "minutes_from_session_start": {
+      "low": 45.0,
+      "high": 13470.0
+    },
+    "minutes_since_prev_obs": {
+      "low": 15.0,
+      "high": 8160.0
+    },
+    "hour": {
+      "low": 0.0,
+      "high": 23.0
+    },
+    "dayofweek": {
+      "low": 0.0,
+      "high": 6.0
+    }
+  }
+}

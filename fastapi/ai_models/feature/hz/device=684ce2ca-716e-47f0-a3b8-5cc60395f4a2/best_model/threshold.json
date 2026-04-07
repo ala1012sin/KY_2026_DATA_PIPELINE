@@ -1,0 +1,14 @@
+{
+  "threshold_p95": 5.09625,
+  "threshold_meta": {
+    "quantile": 0.95,
+    "n_points": 2486,
+    "filters": {
+      "use_train_only": true,
+      "use_business_hour_only": false,
+      "use_op_true_only": true
+    },
+    "target_col": "HZ",
+    "threshold": 5.09625
+  }
+}

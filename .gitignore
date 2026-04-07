@@ -22,6 +22,8 @@ fastapi/ai_models/**
 !fastapi/ai_models/
 !fastapi/ai_models/current/
 !fastapi/ai_models/current/**
+!fastapi/ai_models/feature/
+!fastapi/ai_models/feature/**
 
 # debug 파일 commit 방지
 fastapi/api_debug

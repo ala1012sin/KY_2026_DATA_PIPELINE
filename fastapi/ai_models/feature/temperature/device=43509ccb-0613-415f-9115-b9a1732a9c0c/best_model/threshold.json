@@ -1,0 +1,14 @@
+{
+  "threshold_p95": 77.0,
+  "threshold_meta": {
+    "quantile": 0.95,
+    "n_points": 2156,
+    "filters": {
+      "use_train_only": true,
+      "use_business_hour_only": false,
+      "use_op_true_only": true
+    },
+    "target_col": "TEMPERATURE",
+    "threshold": 77.0
+  }
+}
