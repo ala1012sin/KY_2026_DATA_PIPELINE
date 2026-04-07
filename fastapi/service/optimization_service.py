@@ -719,9 +719,68 @@ def _optimize_company_group(
             "total_slack": 0.0,
         }
 
-    donor_candidates = [row for row in records if not row["is_idle"]]
+    # 다장비 회사도 먼저 구동 타입을 판별한다.
+    # 분배(연속 감산)는 VSD 장비만 donor 후보로 사용한다.
+    donor_candidates = [
+        row for row in records
+        if str(row.get("drive_mode") or "").upper() == "VSD" and not row["is_idle"]
+    ]
     if not donor_candidates:
-        donor_candidates = records.copy()
+        donor_candidates = [
+            row for row in records
+            if str(row.get("drive_mode") or "").upper() == "VSD"
+        ]
+
+    # 회사 내 VSD가 없으면 분배 MILP 대신 장비별 제어 권고만 제공한다.
+    if not donor_candidates:
+        devices_out: List[Dict[str, Any]] = []
+        for row in records:
+            base15 = float(row["p15"])
+            base30 = float(row["p30"])
+            threshold = float(row["threshold"])
+
+            required15 = float(max(0.0, base15 - threshold))
+            required30 = float(max(0.0, base30 - threshold))
+
+            device_out = {
+                "device_id": row["device_id"],
+                "company_name": row.get("company_name"),
+                "customer_id": row.get("customer_id"),
+                "drive_mode": row.get("drive_mode"),
+                "horse_power": row.get("horse_power"),
+                "is_donor": False,
+                "is_idle": bool(row["is_idle"]),
+                "op_status_mean": float(row["op_status_mean"]),
+                "threshold": threshold,
+                "baseline_15": base15,
+                "baseline_30": base30,
+                "optimized_15": base15,
+                "optimized_30": base30,
+                "delta_15": 0.0,
+                "delta_30": 0.0,
+                "shift_in_15": 0.0,
+                "shift_in_30": 0.0,
+                "shift_out_15": 0.0,
+                "shift_out_30": 0.0,
+                "required_shift_15": required15,
+                "required_shift_30": required30,
+                "distributed_targets_15": [],
+                "distributed_targets_30": [],
+                "distribution_text": None,
+                "slack_15": required15,
+                "slack_30": required30,
+            }
+            device_out["distribution_text"] = _build_single_device_fsd_text(device_out)
+            devices_out.append(device_out)
+
+        return {
+            "devices": devices_out,
+            "allocation_plan": [],
+            "donor_device_ids": [],
+            "idle_device_ids": [row["device_id"] for row in records if row["is_idle"]],
+            "objective_peak_sum": float(max((d["baseline_15"] for d in devices_out), default=0.0) + max((d["baseline_30"] for d in devices_out), default=0.0)),
+            "total_slack": float(sum(float(d["slack_15"]) + float(d["slack_30"]) for d in devices_out)),
+        }
 
     donor_candidates.sort(key=lambda r: max(r["p15"], r["p30"]), reverse=True)
     max_donor_count = max(1, min(len(donor_candidates), len(records) - 1))

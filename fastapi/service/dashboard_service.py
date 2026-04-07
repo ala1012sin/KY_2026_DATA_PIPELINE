@@ -146,8 +146,12 @@ def get_history_by_time(device_id: str, lookback_hours: int) -> Dict[str, Dict[s
 
 def get_dashboard_data(device_id: str, lookback_hours: int = 24) -> Dict[str, Any]:
     """대시보드에 필요한 모든 데이터를 한 번에 반환한다."""
-    # 1) 현재 센서값
+    import math
+    now = datetime.now()
+
+    # 1) 현재 센서값 (CURVOLTAGE는 instantaneous_power_w 계산에만 사용, 응답에서 제외)
     current = get_current_sensor_values(device_id)
+    current_values = {k: v for k, v in current.items() if k != "CURVOLTAGE"}
 
     # 2) 피처별 예측 (PRESSURE, TEMPERATURE, HZ, AVGCURRENT, AVGVOLTAGE, FACTOR)
     try:
@@ -174,19 +178,57 @@ def get_dashboard_data(device_id: str, lookback_hours: int = 24) -> Dict[str, An
     current_power_w = current.get("CURVOLTAGE")
     instantaneous_w = round(current_power_w, 4) if current_power_w is not None else None
 
-    # 6) 과거 데이터 시계열(시간 -> 피처맵): 대시보드는 최근 2시간만 제공
+    # 6) 과거 데이터 시계열 + 현재값 + 예측값 2개 append
     history_by_time = get_history_by_time(device_id=device_id, lookback_hours=2)
+
+    def _feat(key: str, horizon: str) -> Optional[float]:
+        pred = feature_preds.get(key)
+        if pred is None:
+            return None
+        try:
+            v = float(pred.get(horizon, 0.0))
+            return None if math.isnan(v) or math.isinf(v) else v
+        except Exception:
+            return None
+
+    # 현재값 추가 (실제 요청 시각 기준)
+    ts_now = now.replace(second=0, microsecond=0).isoformat()
+    history_by_time[ts_now] = {
+        "CURVOLTAGE": instantaneous_w,
+        "PRESSURE": current_values.get("PRESSURE"),
+        "TEMPERATURE": current_values.get("TEMPERATURE"),
+        "HZ": current_values.get("HZ"),
+        "AVGCURRENT": current_values.get("AVGCURRENT"),
+        "AVGVOLTAGE": current_values.get("AVGVOLTAGE"),
+        "FACTOR": current_values.get("FACTOR"),
+    }
+
+    # 예측값 +15/+30분을 현재 시각 기준으로 계산
+    ts_15 = (now + timedelta(minutes=15)).replace(second=0, microsecond=0).isoformat()
+    ts_30 = (now + timedelta(minutes=30)).replace(second=0, microsecond=0).isoformat()
+
+    history_by_time[ts_15] = {
+        "CURVOLTAGE": power_y15,
+        "PRESSURE": _feat("PRESSURE", "y_15_pred"),
+        "TEMPERATURE": _feat("TEMPERATURE", "y_15_pred"),
+        "HZ": _feat("HZ", "y_15_pred"),
+        "AVGCURRENT": _feat("AVGCURRENT", "y_15_pred"),
+        "AVGVOLTAGE": _feat("AVGVOLTAGE", "y_15_pred"),
+        "FACTOR": _feat("FACTOR", "y_15_pred"),
+    }
+    history_by_time[ts_30] = {
+        "CURVOLTAGE": power_y30,
+        "PRESSURE": _feat("PRESSURE", "y_30_pred"),
+        "TEMPERATURE": _feat("TEMPERATURE", "y_30_pred"),
+        "HZ": _feat("HZ", "y_30_pred"),
+        "AVGCURRENT": _feat("AVGCURRENT", "y_30_pred"),
+        "AVGVOLTAGE": _feat("AVGVOLTAGE", "y_30_pred"),
+        "FACTOR": _feat("FACTOR", "y_30_pred"),
+    }
 
     return {
         "device_id": device_id,
-        "timestamp": datetime.now().isoformat(),
-        "current_values": current,
-        "feature_predictions": feature_preds,
-        "power_prediction": {
-            "y_15_pred": power_y15,
-            "y_30_pred": power_y30,
-        },
-        "instantaneous_power_w": instantaneous_w,
+        "timestamp": now.isoformat(),
         "daily_energy_wh": daily_energy_wh,
         "history_by_time": history_by_time,
     }
