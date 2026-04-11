@@ -121,28 +121,6 @@ cd fastapi
 python -m pip install -r requirements.txt
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
-
-## 환경변수
-
-
-```env
-# fastapi/.env
-
-DB_URL=postgresql+psycopg://postgres:Manair5568.@34.47.96.225:5432/postgres?sslmode=require
-DB_HOST=34.47.96.225
-DB_PORT=5432
-DB_USER=postgres
-DB_PASSWORD=Manair5568.
-DB_NAME=postgres
-
-# API 관련 설정
-KY_DEVICE_DATA_URL=https://api-wmumpxg2lq-du.a.run.app/api/device-data
-KY_ERROR_DATA_URL=https://api-wmumpxg2lq-du.a.run.app/api/error-data
-#KY_CUSTOMER_DATA_URL=https://api-wmumpxg2lq-du.a.run.app/api/customer-data # 테스트
-KY_API_TOKEN=
-KY_API_TIMEOUT=10
-KY_API_RETRIES=2
-KY_API_RETRY_BACKOFF=1.0
 ```
 
 ## 참고
