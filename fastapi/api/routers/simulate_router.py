@@ -8,6 +8,7 @@ from api.schemas.simulate import SimulatePredictRequest
 from api.schemas.responses import SimulationPredictResponse, SimulationTemplateResponse, SimulateDevicesResponse
 from service.monitoring_service import record_api_event
 from service.prediction_service import (
+    MODEL_ROOT,
     build_simulation_template,
     list_model_device_ids,
     run_simulation,
@@ -22,7 +23,7 @@ def list_simulation_devices():
     """시뮬레이션 대상 장비 ID 목록을 반환한다."""
     # 드롭다운/선택 UI용 장비 리스트
     try:
-        devices = list_model_device_ids()
+        devices = list_model_device_ids(MODEL_ROOT)
         result = {
             "total": len(devices),
             "devices": devices,
