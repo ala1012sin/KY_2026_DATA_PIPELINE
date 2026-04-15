@@ -1,0 +1,17 @@
+{
+  "target": "AVGVOLTAGE",
+  "horizon_min": 30,
+  "best_model": "XGBoost",
+  "cv_mape": 4.283294804202921,
+  "test_mape": 2.1468671284603875,
+  "test_mae": 8.866307614099716,
+  "n_train": 6993,
+  "n_test": 1749,
+  "warning": false,
+  "all_models": {
+    "LightGBM": 4.618777725870749,
+    "XGBoost": 4.283294804202921,
+    "Ridge": 8.135929396173793,
+    "RandomForest": 4.353072528807127
+  }
+}

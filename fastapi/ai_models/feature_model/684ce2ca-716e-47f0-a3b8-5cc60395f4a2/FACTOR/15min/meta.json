@@ -1,0 +1,17 @@
+{
+  "target": "FACTOR",
+  "horizon_min": 15,
+  "best_model": "LightGBM",
+  "cv_mape": NaN,
+  "test_mape": NaN,
+  "test_mae": 0.0,
+  "n_train": 6930,
+  "n_test": 1733,
+  "warning": false,
+  "all_models": {
+    "LightGBM": NaN,
+    "XGBoost": NaN,
+    "Ridge": NaN,
+    "RandomForest": NaN
+  }
+}

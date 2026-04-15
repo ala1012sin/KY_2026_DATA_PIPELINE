@@ -1,0 +1,17 @@
+{
+  "target": "AVGCURRENT",
+  "horizon_min": 15,
+  "best_model": "XGBoost",
+  "cv_mape": 21.67423967358189,
+  "test_mape": 12.086673977784384,
+  "test_mae": 2.091943077699136,
+  "n_train": 9046,
+  "n_test": 2262,
+  "warning": false,
+  "all_models": {
+    "LightGBM": 22.576580229203024,
+    "XGBoost": 21.67423967358189,
+    "Ridge": 22.769460584052513,
+    "RandomForest": 28.96783757739223
+  }
+}

@@ -17,15 +17,16 @@ fastapi/out_preprocess/
 fastapi/backup/
 *.dump
 
-# ai_models: keep only current in git
+# ai_models: keep only current and feature_model in git
 fastapi/ai_models/**
 !fastapi/ai_models/
 !fastapi/ai_models/current/
 !fastapi/ai_models/current/**
-!fastapi/ai_models/feature/
-!fastapi/ai_models/feature/**
+!fastapi/ai_models/feature_model/
+!fastapi/ai_models/feature_model/**
 
 # debug 파일 commit 방지
 fastapi/api_debug
+.codex
 
 *:Zone.Identifier

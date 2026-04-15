@@ -1,0 +1,17 @@
+{
+  "best_model": "MLP",
+  "cv_mape": 50.79412566916064,
+  "test_mape": 48.47426107002719,
+  "test_mae": 91.17232826683431,
+  "n_train": 15196,
+  "n_test": 3799,
+  "warning": true,
+  "all_models": {
+    "LightGBM": 69.46387762024227,
+    "XGBoost": 171.20926517455,
+    "Ridge": 78.40145099710752,
+    "RandomForest": 150.12474858827164,
+    "MLP": 50.79412566916064
+  },
+  "horizon_min": 15
+}
