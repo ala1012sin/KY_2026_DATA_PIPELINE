@@ -25,9 +25,9 @@
     .bad { color: #b91c1c; }
     .rec-list { margin: 0; padding-left: 18px; }
     .rec-list li { margin-bottom: 8px; line-height: 1.5; }
-    .rec-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .rec-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
     .rec-col { border: 1px solid #e5e7eb; border-radius: 8px; background: #f9fafb; padding: 10px; }
-    .rec-col h4 { margin: 0 0 8px; font-size: 13px; color: #334155; }
+    .rec-col h4 { margin: 0 0 8px; font-size: 13px; color: #334155; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
     .rec-empty { color: #6b7280; font-size: 13px; }
     .table-wrap { overflow: auto; border: 1px solid #e5e7eb; border-radius: 8px; }
     table { width: 100%; border-collapse: collapse; min-width: 980px; font-size: 12px; }
@@ -78,20 +78,11 @@
 
   <div class="card">
     <h3>추천 분배 문구</h3>
-    <div class="rec-grid">
-      <div class="rec-col">
-        <h4 id="recTitle1">장비 1</h4>
-        <ul class="rec-list" id="recommendList1"></ul>
-      </div>
-      <div class="rec-col">
-        <h4 id="recTitle2">장비 2</h4>
-        <ul class="rec-list" id="recommendList2"></ul>
-      </div>
-    </div>
+    <div class="rec-grid" id="recGrid"></div>
   </div>
 
   <div class="card">
-    <h3>최대 가동 장비 2대 예측 그래프 (15/30분)</h3>
+    <h3>전체 장비 예측 그래프 (15/30분)</h3>
     <div class="chart-box">
       <div id="peakChart"></div>
     </div>
@@ -111,10 +102,7 @@
     const btnRun = document.getElementById('btnRun');
     const statusTextEl = document.getElementById('statusText');
     const summaryGridEl = document.getElementById('summaryGrid');
-    const recTitle1El = document.getElementById('recTitle1');
-    const recTitle2El = document.getElementById('recTitle2');
-    const recommendList1El = document.getElementById('recommendList1');
-    const recommendList2El = document.getElementById('recommendList2');
+    const recGridEl = document.getElementById('recGrid');
     const chartEl = document.getElementById('peakChart');
     const loadingModalEl = document.getElementById('loadingModal');
 
@@ -149,33 +137,35 @@
         return;
       }
 
-      const donors = (Array.isArray(data.devices) ? data.devices : [])
-        .filter((d) => d.is_donor)
-        .sort((a, b) => Math.max(b.baseline_15 || 0, b.baseline_30 || 0) - Math.max(a.baseline_15 || 0, a.baseline_30 || 0))
-        .slice(0, 2);
+      const allDevices = (Array.isArray(data.devices) ? data.devices : [])
+        .sort((a, b) => Math.max(b.baseline_15 || 0, b.baseline_30 || 0) - Math.max(a.baseline_15 || 0, a.baseline_30 || 0));
 
-      if (donors.length === 0) {
+      if (allDevices.length === 0) {
         Plotly.purge(chartEl);
-        chartEl.innerHTML = '<div class="muted" style="padding:14px 10px;">그래프로 표시할 분배원 장비가 없습니다.</div>';
+        chartEl.innerHTML = '<div class="muted" style="padding:14px 10px;">그래프로 표시할 장비가 없습니다.</div>';
         return;
       }
 
-      const colors = ['#2563eb', '#16a34a'];
+      const COLS = Math.min(allDevices.length, 2);
+      const ROWS = Math.ceil(allDevices.length / COLS);
+      const ROW_H = 280;
+      const colors = ['#2563eb', '#16a34a', '#9333ea', '#ea580c', '#0891b2', '#be185d'];
 
       const traces = [];
       const xLabels = ['15분', '30분'];
       const layout = {
-        grid: { rows: 1, columns: 2, pattern: 'independent' },
-        margin: { l: 46, r: 18, t: 48, b: 48 },
-        height: 560,
+        grid: { rows: ROWS, columns: COLS, pattern: 'independent' },
+        margin: { l: 46, r: 18, t: 56, b: 48 },
+        height: ROW_H * ROWS + 56,
         paper_bgcolor: '#ffffff',
         plot_bgcolor: '#ffffff',
         font: { family: 'Arial, sans-serif', color: '#111827' },
         showlegend: true,
-        legend: { orientation: 'h', x: 0, y: 1.14 },
+        legend: { orientation: 'h', x: 0, y: 1.04 },
+        annotations: [],
       };
 
-      donors.forEach((device, idx) => {
+      allDevices.forEach((device, idx) => {
         const axisSuffix = idx === 0 ? '' : String(idx + 1);
         const lineColor = colors[idx % colors.length];
         const p15 = toKw(device.baseline_15 || 0);
@@ -229,11 +219,7 @@
         }
 
         const yMax = Math.max(p15, p30, th, th + exceed15, th + exceed30, 1) * 1.25;
-        layout[`xaxis${axisSuffix}`] = {
-          tickfont: { size: 12, color: '#334155' },
-          showgrid: false,
-          zeroline: false,
-        };
+        layout[`xaxis${axisSuffix}`] = { tickfont: { size: 12, color: '#334155' }, showgrid: false, zeroline: false };
         layout[`yaxis${axisSuffix}`] = {
           range: [0, yMax],
           title: { text: 'kW', font: { size: 12, color: '#334155' } },
@@ -242,15 +228,19 @@
           zeroline: false,
         };
 
-        layout.annotations = (layout.annotations || []);
+        // 서브플롯 제목: paper 좌표 계산
+        const col = idx % COLS;
+        const row = Math.floor(idx / COLS);
+        const xPaper = COLS === 1 ? 0.5 : (col === 0 ? 0.22 : 0.78);
+        const yPaper = ROWS === 1 ? 1.06 : 1.06 - row * (1 / ROWS) * (ROW_H / (ROW_H + 10));
+        const shortId = esc(device.device_id).slice(0, 18) + (device.device_id.length > 18 ? '…' : '');
+        const donorMark = device.is_donor ? ' ★' : '';
         layout.annotations.push({
-          text: esc(device.device_id),
-          xref: 'paper',
-          yref: 'paper',
-          x: idx === 0 ? 0.22 : 0.78,
-          y: 1.06,
+          text: `<b>${shortId}${donorMark}</b>`,
+          xref: 'paper', yref: 'paper',
+          x: xPaper, y: yPaper,
           showarrow: false,
-          font: { size: 12, color: '#111827' },
+          font: { size: 11, color: '#111827' },
         });
       });
 
@@ -285,70 +275,32 @@
 
     function renderRecommendations(data) {
       const devices = Array.isArray(data.devices) ? data.devices : [];
-      const donors = devices.filter((d) => d.is_donor)
-        .sort((a, b) => Math.max(b.baseline_15 || 0, b.baseline_30 || 0) - Math.max(a.baseline_15 || 0, a.baseline_30 || 0))
-        .slice(0, 2);
+      if (!devices.length) {
+        recGridEl.innerHTML = '<div class="rec-empty">표시할 장비가 없습니다.</div>';
+        return;
+      }
 
-      const columns = [
-        { titleEl: recTitle1El, listEl: recommendList1El, donor: donors[0] },
-        { titleEl: recTitle2El, listEl: recommendList2El, donor: donors[1] },
-      ];
+      recGridEl.innerHTML = devices.map((dev) => {
+        const badge = dev.is_donor
+          ? '<span class="tag tag-donor">VSD</span>'
+          : dev.is_idle
+          ? '<span class="tag tag-idle">미가동</span>'
+          : '';
 
-      columns.forEach(({ titleEl, listEl, donor }, idx) => {
-        if (!donor) {
-          titleEl.textContent = `장비 ${idx + 1}`;
-          listEl.innerHTML = '<li class="rec-empty">표시할 분배원 장비가 없습니다.</li>';
-          return;
-        }
+        const lines = dev.distribution_text
+          ? String(dev.distribution_text).split('\n').map((x) => x.trim()).filter(Boolean)
+          : [];
 
-        titleEl.textContent = donor.device_id;
-        const recs = [];
+        const content = lines.length
+          ? lines.map((x) => `<li>${esc(x)}</li>`).join('')
+          : '<li class="rec-empty">현재 조건에서는 임계치 초과 예상이 없어 분배 문구가 없습니다.</li>';
 
-        // 백엔드가 만든 권고문을 우선 사용(회사별/단일장비 FSD 대응)
-        if (donor.distribution_text && String(donor.distribution_text).trim()) {
-          const lines = String(donor.distribution_text)
-            .split('\n')
-            .map((x) => x.trim())
-            .filter(Boolean);
-          if (lines.length) {
-            listEl.innerHTML = lines.map((x) => `<li>${esc(x)}</li>`).join('');
-            return;
-          }
-        }
-
-        [
-          { minute: 15, base: Number(donor.baseline_15 || 0), threshold: Number(donor.threshold || 0), out: Number(donor.shift_out_15 || 0) },
-          { minute: 30, base: Number(donor.baseline_30 || 0), threshold: Number(donor.threshold || 0), out: Number(donor.shift_out_30 || 0) },
-        ].forEach((h) => {
-          if (h.base <= h.threshold || h.out <= 0) return;
-
-          const allocations = (data.allocation_plan || [])
-            .filter((x) => Number(x.minute) === h.minute && x.from_device_id === donor.device_id)
-            .sort((a, b) => Number(b.power_w || 0) - Number(a.power_w || 0));
-
-          const mainReceiver = allocations[0];
-          const over = h.base - h.threshold;
-
-          if (mainReceiver) {
-            recs.push(
-              `${h.minute}분 후 임계치 초과 예상량은 ${formatKw(over, 2)}kW입니다. ` +
-              `${mainReceiver.to_device_id} 장비로 약 ${formatKw(mainReceiver.power_w, 2)}kW를 분배하면 피크 완화가 가능합니다.`
-            );
-          } else {
-            recs.push(
-              `${h.minute}분 후 임계치 초과 예상량은 ${formatKw(over, 2)}kW이며, 현재 최적화에서는 ` +
-              `수신 장비가 확보되지 않아 분배 효과가 제한적입니다.`
-            );
-          }
-        });
-
-        if (recs.length === 0) {
-          listEl.innerHTML = '<li class="rec-empty">현재 조건에서는 임계치 초과 예상이 없어 분배 문구가 없습니다.</li>';
-          return;
-        }
-
-        listEl.innerHTML = recs.map((x) => `<li>${esc(x)}</li>`).join('');
-      });
+        return `
+          <div class="rec-col">
+            <h4>${esc(dev.device_id)} ${badge}</h4>
+            <ul class="rec-list">${content}</ul>
+          </div>`;
+      }).join('');
     }
 
     async function runMilp() {
@@ -388,8 +340,7 @@
       } catch (e) {
         statusTextEl.textContent = `오류: ${String(e)}`;
         summaryGridEl.innerHTML = '';
-        recommendList1El.innerHTML = '<li class="rec-empty">결과를 가져오지 못했습니다.</li>';
-        recommendList2El.innerHTML = '<li class="rec-empty">결과를 가져오지 못했습니다.</li>';
+        recGridEl.innerHTML = '<div class="rec-empty">결과를 가져오지 못했습니다.</div>';
         if (window.Plotly) {
           Plotly.purge(chartEl);
         }

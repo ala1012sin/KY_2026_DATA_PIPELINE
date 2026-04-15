@@ -343,15 +343,17 @@ function renderSensorCard(key, meta, currentVal, pred15, pred30) {
   </div>`;
 }
 
-function renderPowerCard(label, currentVal, predVal, isAccum) {
+function renderPowerCard(label, currentVal, pred15, pred30, isAccum) {
   const displayVal = currentVal !== null ? fmt(currentVal, 2) : '-';
   const unit = `<span style="font-size:18px;font-weight:400">kW${isAccum ? 'h' : ''}</span>`;
-  const badgeHtml = isAccum ? '' : pctBadge(currentVal, predVal);
-  const dot = isAccum ? 'dot-none' : dotClass(currentVal, predVal);
-  const predDisp = predVal !== null ? fmt(predVal, 2) : '-';
+  const badgeHtml = isAccum ? '' : pctBadge(currentVal, pred15);
+  const dot = isAccum ? 'dot-none' : dotClass(currentVal, pred15);
+  const pred15Disp = pred15 !== null ? fmt(pred15, 2) : '-';
+  const pred30Disp = pred30 !== null ? fmt(pred30, 2) : '-';
   const predLabel = isAccum ? '' : `
-    <div class="card-pred-label">15분 후 예측</div>
-    <div style="font-size:14px; font-weight:600; color:#374151">${predDisp} kW</div>`;
+    <div class="card-pred-label">15분/30분 예측</div>
+    <div style="font-size:14px; font-weight:600; color:#374151">15분: ${pred15Disp} kW</div>
+    <div style="font-size:13px; font-weight:600; color:#374151">30분: ${pred30Disp} kW</div>`;
 
   return `
   <div class="card">
@@ -363,37 +365,59 @@ function renderPowerCard(label, currentVal, predVal, isAccum) {
   </div>`;
 }
 
+function getTimelineSlices(data) {
+  const historyMap = (data && data.history_by_time) || {};
+  const nowMs = data && data.timestamp ? new Date(data.timestamp).getTime() : Date.now();
+  const entries = Object.keys(historyMap)
+    .sort()
+    .map((ts) => ({
+      ts,
+      ms: new Date(ts).getTime(),
+      row: historyMap[ts] || {},
+    }))
+    .filter((item) => Number.isFinite(item.ms));
+
+  const past = entries.filter((item) => item.ms <= nowMs);
+  const future = entries.filter((item) => item.ms > nowMs);
+  const currentEntry = past.length ? past[past.length - 1] : null;
+
+  return { entries, past, future, currentEntry };
+}
+
 function renderDashboard(data) {
   latestDashboardData = data;
-  const current = data.current_values || {};
-  const featPreds = data.feature_predictions || {};
-  const powerPred = data.power_prediction || {};
+  const { currentEntry, future } = getTimelineSlices(data);
+  const current = currentEntry ? currentEntry.row : {};
+  const pred15Entry = future[0] || null;
+  const pred30Entry = future[1] || pred15Entry;
 
   // ── 센서 카드 ──
   let sensorHtml = '';
   for (const [key, meta] of Object.entries(SENSOR_META)) {
     const curVal = current[key] !== undefined ? current[key] : null;
-    const fp = featPreds[key];
-    const pred15 = fp ? fp.y_15_pred : null;
-    const pred30 = fp ? fp.y_30_pred : null;
+    const pred15 = pred15Entry && pred15Entry.row[key] !== undefined ? pred15Entry.row[key] : null;
+    const pred30 = pred30Entry && pred30Entry.row[key] !== undefined ? pred30Entry.row[key] : null;
     sensorHtml += renderSensorCard(key, meta, curVal, pred15, pred30);
   }
   document.getElementById('sensorGrid').innerHTML = sensorHtml;
 
   // ── API는 W/Wh, 화면 표시는 kW/kWh로 변환 ──
-  const instKw = data.instantaneous_power_w !== undefined && data.instantaneous_power_w !== null
-    ? Number(data.instantaneous_power_w) / 1000
+  const instKw = current.CURVOLTAGE !== undefined && current.CURVOLTAGE !== null
+    ? Number(current.CURVOLTAGE) / 1000
     : null;
-  const predInstKw = powerPred.y_15_pred !== undefined && powerPred.y_15_pred !== null
-    ? Number(powerPred.y_15_pred) / 1000
+  const predInstKw15 = pred15Entry && pred15Entry.row.CURVOLTAGE !== undefined && pred15Entry.row.CURVOLTAGE !== null
+    ? Number(pred15Entry.row.CURVOLTAGE) / 1000
+    : null;
+  const predInstKw30 = pred30Entry && pred30Entry.row.CURVOLTAGE !== undefined && pred30Entry.row.CURVOLTAGE !== null
+    ? Number(pred30Entry.row.CURVOLTAGE) / 1000
     : null;
   const dailyKwh = data.daily_energy_wh !== undefined && data.daily_energy_wh !== null
     ? Number(data.daily_energy_wh) / 1000
     : null;
 
   let powerHtml = '';
-  powerHtml += renderPowerCard('순시 전력량(kW)', instKw, predInstKw, false);
-  powerHtml += renderPowerCard('일 누적 전력량(kWh)', dailyKwh, null, true);
+  powerHtml += renderPowerCard('순시 전력량(kW)', instKw, predInstKw15, predInstKw30, false);
+  powerHtml += renderPowerCard('일 누적 전력량(kWh)', dailyKwh, null, null, true);
   document.getElementById('powerGrid').innerHTML = powerHtml;
 
   renderTrendChart();
@@ -402,37 +426,18 @@ function renderDashboard(data) {
 function renderTrendChart() {
   const target = document.getElementById('trendFeature').value;
   const data = latestDashboardData || {};
-  const historyMap = data.history_by_time || {};
+  const { past, future } = getTimelineSlices(data);
 
-  const xHist = [];
-  const yHist = [];
-  Object.keys(historyMap)
-    .sort()
-    .forEach((t) => {
-      const row = historyMap[t] || {};
-      const v = row[target];
-      if (v === null || v === undefined) return;
-      xHist.push(new Date(t));
-      yHist.push(Number(v));
-    });
+  const histPoints = past
+    .map((item) => ({ x: new Date(item.ts), y: item.row[target] }))
+    .filter((item) => item.y !== null && item.y !== undefined);
+  const predPoints = future
+    .slice(0, 2)
+    .map((item) => ({ x: new Date(item.ts), y: item.row[target] }))
+    .filter((item) => item.y !== null && item.y !== undefined);
 
-  const powerPred = data.power_prediction || {};
-  const featurePreds = data.feature_predictions || {};
-
-  let pred15 = null;
-  let pred30 = null;
-  if (target === 'CURVOLTAGE') {
-    pred15 = powerPred.y_15_pred;
-    pred30 = powerPred.y_30_pred;
-  } else {
-    const fp = featurePreds[target] || {};
-    pred15 = fp.y_15_pred;
-    pred30 = fp.y_30_pred;
-  }
-
-  const baseTime = xHist.length ? xHist[xHist.length - 1] : new Date();
-  const xPred15 = new Date(baseTime.getTime() + 15 * 60 * 1000);
-  const xPred30 = new Date(baseTime.getTime() + 30 * 60 * 1000);
+  const xHist = histPoints.map((item) => item.x);
+  const yHist = histPoints.map((item) => Number(item.y));
 
   const traces = [
     {
@@ -446,13 +451,15 @@ function renderTrendChart() {
     },
   ];
 
-  if (xHist.length && pred15 !== null && pred15 !== undefined) {
+  if (xHist.length && predPoints.length) {
+    const predX = [xHist[xHist.length - 1]].concat(predPoints.map((item) => item.x));
+    const predY = [yHist[yHist.length - 1]].concat(predPoints.map((item) => Number(item.y)));
     traces.push({
       type: 'scatter',
       mode: 'lines+markers',
       name: '예측 (15/30분)',
-      x: pred30 !== null && pred30 !== undefined ? [baseTime, xPred15, xPred30] : [baseTime, xPred15],
-      y: pred30 !== null && pred30 !== undefined ? [yHist[yHist.length - 1], Number(pred15), Number(pred30)] : [yHist[yHist.length - 1], Number(pred15)],
+      x: predX,
+      y: predY,
       line: { color: '#ef4444', width: 2, dash: 'dash' },
       marker: { size: 7, symbol: 'diamond' },
     });
