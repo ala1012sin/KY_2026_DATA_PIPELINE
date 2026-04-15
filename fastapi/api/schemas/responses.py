@@ -94,41 +94,6 @@ class SimulationPredictResponse(BaseModel):
     input_influence: Dict[str, float] = Field(default_factory=dict)
 
 
-class ModelInfoResponse(BaseModel):
-    """모델 메타정보 응답 스키마."""
-    device_id: str
-    best_model: str
-    model_type: str
-    dl_seq_len: Optional[int] = None
-    required_features: List[str] = Field(default_factory=list)
-    model_root: str
-
-
-class ReloadModelsResponse(BaseModel):
-    """모델 재로딩 응답 스키마."""
-    status: str
-    model_root: str
-
-
-class MilpSelectedItem(BaseModel):
-    """MILP 선택 항목 스키마."""
-    index: int
-    gain_kw: float
-    cost: float
-
-
-class MilpTestResponse(BaseModel):
-    """MILP 테스트 응답 스키마."""
-    status: str
-    success: bool
-    message: str
-    objective_gain_kw: float
-    total_cost: float
-    selected_indices: List[int] = Field(default_factory=list)
-    selected_items: List[MilpSelectedItem] = Field(default_factory=list)
-    raw_solution: List[float] = Field(default_factory=list)
-
-
 class PeakDispatchDeviceResult(BaseModel):
     """장비별 피크 분배 결과 스키마."""
     device_id: str
@@ -156,30 +121,3 @@ class PeakDispatchResponse(BaseModel):
     allocation_plan: List[Dict[str, Any]] = Field(default_factory=list)
     devices: List[PeakDispatchDeviceResult] = Field(default_factory=list)
     skipped_devices: List[Dict[str, Any]] = Field(default_factory=list)
-
-
-class MonitoringDailyCount(BaseModel):
-    """일별 호출 집계 스키마."""
-    date: str
-    total: int
-    success: int
-    failed: int
-    no_data: int
-
-
-class MonitoringTopDevice(BaseModel):
-    """장비별 호출 상위 집계 스키마."""
-    device_id: str
-    count: int
-
-
-class MonitoringSummaryResponse(BaseModel):
-    """운영 모니터링 요약 응답 스키마."""
-    period_days: int
-    total_requests: int
-    success_requests: int
-    failed_requests: int
-    no_data_requests: int
-    no_data_ratio_pct: float
-    daily_counts: List[MonitoringDailyCount] = Field(default_factory=list)
-    top_devices: List[MonitoringTopDevice] = Field(default_factory=list)
