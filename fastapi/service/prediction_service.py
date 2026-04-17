@@ -1,6 +1,5 @@
 """예측/시뮬레이션 공통 비즈니스 로직 서비스."""
 
-import ast
 import os
 import re
 from datetime import datetime, timedelta
@@ -14,119 +13,152 @@ from Logger import Logger as logger
 from db.public.models import TB_SIMULATION_LOG
 from infrastructure.queryFactory.base_orm import BaseQueryFactory
 from setting.database_orm import db_connection_pool
+from service.model_input_utils import (
+    add_current_model_aliases,
+    list_model_device_ids,
+    resolve_editable_raw_fields,
+)
 from service.model_store import ModelStore
 from service.processing.config import PreprocessConfig
 from service.processing.pipeline import (
     DataNotFoundError,
     fetch_pems_pro_log_df,
-    preprocess_pems_pro_from_db_in_memory,
-    preprocess_raw_df_to_supervised,
 )
 
 MODEL_ROOT = str(Path(os.environ.get("MODEL_ROOT", "./ai_models/current")).expanduser().resolve())
 store = ModelStore(MODEL_ROOT)
 
-_FE_SUFFIX_PATTERNS = (
-    r"_lag\d+$",
-    r"_diff\d+$",
-    r"_pct\d+$",
-    r"_roll\d+_(mean|std)$",
-)
 
-
-def _to_base_feature_name(feature_name: str) -> str:
-    # lag/rolling/diff/pct 파생 suffix를 제거해 원본 컬럼명을 추출
-    base = str(feature_name)
-    for pattern in _FE_SUFFIX_PATTERNS:
-        base = re.sub(pattern, "", base)
-    return base
-
-
-def _expand_feature_name_tokens(feature_name: str) -> List[str]:
-    # "('PRESSURE', 'LOG_ID')" 같은 tuple-string 피처도 raw 컬럼 후보로 펼친다.
-    base = _to_base_feature_name(feature_name)
-    tokens = {base}
-
-    try:
-        parsed = ast.literal_eval(base)
-    except Exception:
-        parsed = None
-
-    if isinstance(parsed, (tuple, list)):
-        for item in parsed:
-            token = str(item).strip()
-            if token:
-                tokens.add(token)
-
-    return [token for token in tokens if token]
-
-
-def resolve_editable_raw_fields(feature_cols: List[str], raw_columns: List[str]) -> List[str]:
-    # 직접 제어 의미가 낮은 식별/시간/타깃성 컬럼은 시뮬 입력에서 제외
-    raw_excludes = {
-        "LOG_ID", "DEVICE_ID", "LOG_DT",
-        "CURVOLTAGE", "CUR_VOLTAGE",
-        "AVG_VOLTAGE", "AVG_CURRENT",
-        "OP_STATUS", "CSUSAGETIME", "MGREFILLTIME",
-    }
-    base_feature_names = {
-        token
-        for col in feature_cols
-        for token in _expand_feature_name_tokens(col)
-    }
-    return [
-        col for col in raw_columns
-        if col not in raw_excludes and col in base_feature_names
-    ]
-
-
-def list_model_device_ids() -> List[str]:
-    # 모델 저장소(device=...) 디렉터리 기준으로 장비 목록 구성
-    if not os.path.isdir(MODEL_ROOT):
-        return []
-
-    device_ids: List[str] = []
-    for name in os.listdir(MODEL_ROOT):
-        full_path = os.path.join(MODEL_ROOT, name)
-        if os.path.isdir(full_path) and name.startswith("device="):
-            device_id = name.split("device=", 1)[-1].strip()
-            if device_id:
-                device_ids.append(device_id)
-
-    return sorted(set(device_ids))
-
-
-def predict_one_device(device_id: str, lookback_hours: int, max_data_age_hours: int) -> Dict[str, Any]:
-    # 자동 예측 공통 경로(조회→전처리→예측)
+def _validate_lookback_hours(lookback_hours: int) -> None:
+    """조회 lookback 입력 범위를 검증한다."""
     if lookback_hours <= 0:
         raise HTTPException(status_code=400, detail="lookback_hours는 1 이상이어야 합니다")
     if lookback_hours > 24 * 31:
         raise HTTPException(status_code=400, detail="lookback_hours가 너무 큽니다(최대 744시간)")
+
+
+def _validate_max_data_age_hours(max_data_age_hours: int) -> None:
+    """허용 가능한 최신 데이터 나이 입력을 검증한다."""
     if max_data_age_hours <= 0:
         raise HTTPException(status_code=400, detail="max_data_age_hours는 1 이상이어야 합니다")
 
+
+def _get_runner(device_id: str):
+    """장비용 예측 러너를 조회하고 모델 관련 예외를 HTTP 예외로 변환한다."""
     try:
-        runner = store.get_runner(device_id)
+        return store.get_runner(device_id)
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
+
+def _to_naive_timestamp(value: Any) -> pd.Timestamp:
+    """타임존 포함 여부와 상관없이 naive timestamp로 정규화한다."""
+    ts = pd.Timestamp(value)
+    if ts.tzinfo is not None:
+        ts = ts.tz_convert("UTC").tz_localize(None)
+    return ts
+
+
+def _enforce_freshness_or_404(latest_ts: Any, max_data_age_hours: int) -> None:
+    """기준 시각이 너무 오래됐으면 404로 응답한다."""
+    latest_ts = _to_naive_timestamp(latest_ts)
+    now_ts = pd.Timestamp.now().tz_localize(None)
+    age_hours = float((now_ts - latest_ts).total_seconds() / 3600.0)
+    if age_hours > max_data_age_hours:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"최신 데이터가 너무 오래되었습니다. "
+                f"기준시각={latest_ts.isoformat()}, 경과={age_hours:.1f}h, 허용={max_data_age_hours}h"
+            ),
+        )
+
+
+def _resolve_required_rows(runner) -> int:
+    """모델 타입에 맞는 최소 입력 행 수를 계산한다."""
+    required_rows = runner.dl_seq_len if runner.model_type == "DL" else 1
+    return 1 if required_rows is None else int(required_rows)
+
+
+# ---------------------------------------------------------------------------
+# 예측 공통 경로
+# ---------------------------------------------------------------------------
+def predict_from_raw_history(
+    device_id: str,
+    runner,
+    raw: pd.DataFrame,
+    max_data_age_hours: int,
+    enforce_freshness: bool,
+    reference_timestamp: Optional[Any] = None,
+) -> Dict[str, Any]:
+    if raw is None or raw.empty:
+        raise HTTPException(status_code=404, detail="선택한 기간에 원본 데이터가 없습니다")
+
+    if "DEVICE_ID" not in raw.columns:
+        raw = raw.copy()
+        raw["DEVICE_ID"] = device_id
+
+    raw = raw[raw["DEVICE_ID"].astype(str) == str(device_id)].copy()
+    if raw.empty:
+        raise HTTPException(status_code=404, detail="선택한 기간에 해당 장비 데이터가 없습니다")
+
+    if "LOG_DT" not in raw.columns:
+        raise HTTPException(status_code=500, detail="원본 데이터에 시간 컬럼이 없습니다: LOG_DT")
+
+    raw["LOG_DT"] = pd.to_datetime(raw["LOG_DT"], errors="coerce")
+    raw = raw.dropna(subset=["LOG_DT"]).sort_values("LOG_DT").reset_index(drop=True)
+    if raw.empty:
+        raise HTTPException(status_code=404, detail="시간 정보가 유효한 데이터가 없습니다")
+
+    if enforce_freshness:
+        _enforce_freshness_or_404(raw.iloc[-1]["LOG_DT"], max_data_age_hours)
+
+    selected = raw
+    if reference_timestamp is not None:
+        ref_ts = _to_naive_timestamp(reference_timestamp)
+        selected = raw[raw["LOG_DT"] <= ref_ts].copy()
+        if selected.empty:
+            raise HTTPException(status_code=404, detail="기준시각 이전 원본 데이터가 없습니다")
+
+    try:
+        result = runner.predict_latest(selected, reference_timestamp=reference_timestamp)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    return {
+        "device_id": device_id,
+        "best_model": runner.best_model,
+        "preds": result["preds"],
+        "missing_features": runner.last_missing_features,
+        "base_timestamp": result["timestamp"],
+    }
+
+
+def predict_one_device(device_id: str, lookback_hours: int, max_data_age_hours: int) -> Dict[str, Any]:
+    # 자동 예측 공통 경로(조회→전처리→예측)
+    _validate_lookback_hours(lookback_hours)
+    _validate_max_data_age_hours(max_data_age_hours)
+    runner = _get_runner(device_id)
+
     end_dt = datetime.now()
     start_dt = end_dt - timedelta(hours=lookback_hours)
 
-    pcfg = PreprocessConfig()
-    meta = preprocess_pems_pro_from_db_in_memory(
-        start_dt=start_dt,
-        end_dt=end_dt,
-        pcfg=pcfg,
-        device_ids=[device_id],
-    )
+    try:
+        raw = fetch_pems_pro_log_df(
+            start_dt=start_dt,
+            end_dt=end_dt,
+            device_ids=[device_id],
+        )
+    except DataNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
 
-    return predict_from_preprocessed(
+    raw = add_current_model_aliases(raw)
+    return predict_from_raw_history(
         device_id=device_id,
         runner=runner,
-        meta=meta,
+        raw=raw,
         max_data_age_hours=max_data_age_hours,
         enforce_freshness=True,
     )
@@ -162,26 +194,10 @@ def predict_from_preprocessed(
     if df.empty:
         raise HTTPException(status_code=404, detail="시간 정보가 유효한 데이터가 없습니다")
 
-    base_timestamp = df.iloc[-1][time_col]
-    now_ts = pd.Timestamp.now().tz_localize(None)
-    base_ts = pd.Timestamp(base_timestamp)
-    if base_ts.tzinfo is not None:
-        base_ts = base_ts.tz_convert("UTC").tz_localize(None)
-
     if enforce_freshness:
-        age_hours = float((now_ts - base_ts).total_seconds() / 3600.0)
-        if age_hours > max_data_age_hours:
-            raise HTTPException(
-                status_code=404,
-                detail=(
-                    f"최신 데이터가 너무 오래되었습니다. "
-                    f"기준시각={base_ts.isoformat()}, 경과={age_hours:.1f}h, 허용={max_data_age_hours}h"
-                ),
-            )
+        _enforce_freshness_or_404(df.iloc[-1][time_col], max_data_age_hours)
 
-    required_rows = runner.dl_seq_len if runner.model_type == "DL" else 1
-    if required_rows is None:
-        required_rows = 1
+    required_rows = _resolve_required_rows(runner)
 
     if len(df) < required_rows:
         raise HTTPException(
@@ -191,10 +207,7 @@ def predict_from_preprocessed(
 
     selected = df
     if reference_timestamp is not None:
-        ref_ts = pd.Timestamp(reference_timestamp)
-        if ref_ts.tzinfo is not None:
-            ref_ts = ref_ts.tz_convert("UTC").tz_localize(None)
-
+        ref_ts = _to_naive_timestamp(reference_timestamp)
         candidate = df[df[time_col] <= ref_ts]
         if candidate.empty:
             candidate = df[df[time_col] == df[time_col].min()]
@@ -210,9 +223,7 @@ def predict_from_preprocessed(
     rows = rows_df.to_dict(orient="records")
     preds, _ = runner.predict(rows)
 
-    selected_ts = pd.Timestamp(rows_df.iloc[-1][time_col])
-    if selected_ts.tzinfo is not None:
-        selected_ts = selected_ts.tz_convert("UTC").tz_localize(None)
+    selected_ts = _to_naive_timestamp(rows_df.iloc[-1][time_col])
 
     return {
         "device_id": device_id,
@@ -241,22 +252,42 @@ def clear_model_caches() -> None:
     store.clear_cache()
 
 
+# ---------------------------------------------------------------------------
+# 수동 예측 / 시뮬레이션 입력 생성
+# ---------------------------------------------------------------------------
 def predict_manual(device_id: str, rows: List[Dict[str, float]]) -> Dict[str, Any]:
-    # 수동 예측 공통 경로(feature row 직접 입력)
-    try:
-        runner = store.get_runner(device_id)
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    preds, warns = runner.predict(rows)
+    # 수동 예측 공통 경로(raw row 직접 입력)
+    runner = _get_runner(device_id)
+
+    if not rows:
+        raise HTTPException(status_code=400, detail="rows는 1개 이상이어야 합니다")
+
+    raw = pd.DataFrame(rows)
+    if raw.empty:
+        raise HTTPException(status_code=400, detail="rows가 비어 있습니다")
+
+    if "DEVICE_ID" not in raw.columns:
+        raw["DEVICE_ID"] = device_id
+    if "LOG_DT" not in raw.columns:
+        end = pd.Timestamp.now().floor("15min")
+        raw["LOG_DT"] = pd.date_range(end=end, periods=len(raw), freq="15min")
+
+    raw = add_current_model_aliases(raw)
+    result = predict_from_raw_history(
+        device_id=device_id,
+        runner=runner,
+        raw=raw,
+        max_data_age_hours=24 * 365,
+        enforce_freshness=False,
+    )
+
     return {
         "device_id": device_id,
         "best_model": runner.best_model,
-        "preds": preds,
+        "preds": result["preds"],
         "missing_feature_count": runner.last_missing_count,
         "missing_features": runner.last_missing_features,
-        "warnings": warns,
+        "warnings": [],
     }
 
 
@@ -270,22 +301,13 @@ def _load_simulation_raw(device_id: str, start_dt: datetime, end_dt: datetime) -
         raise HTTPException(status_code=404, detail="선택한 장비/기간에 데이터가 없습니다")
 
     sort_cols = ["LOG_DT", "LOG_ID"] if "LOG_ID" in raw.columns else ["LOG_DT"]
-    return raw.sort_values(sort_cols).copy()
+    return add_current_model_aliases(raw.sort_values(sort_cols).copy())
 
 
 def build_simulation_template(device_id: str, lookback_hours: int = 24) -> Dict[str, Any]:
     # 시뮬레이션 시작 시점에 필요한 기준 정보(기준행/기준예측/수정가능필드) 구성
-    if lookback_hours <= 0:
-        raise HTTPException(status_code=400, detail="lookback_hours는 1 이상이어야 합니다")
-    if lookback_hours > 24 * 31:
-        raise HTTPException(status_code=400, detail="lookback_hours가 너무 큽니다(최대 744시간)")
-
-    try:
-        runner = store.get_runner(device_id)
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    _validate_lookback_hours(lookback_hours)
+    runner = _get_runner(device_id)
 
     base_dt = datetime.now()
     start_dt = base_dt - timedelta(hours=lookback_hours)
@@ -317,40 +339,8 @@ def build_simulation_template(device_id: str, lookback_hours: int = 24) -> Dict[
     }
 
 
-def run_simulation(
-    device_id: str,
-    overrides: Dict[str, float],
-    lookback_hours: int,
-    base_timestamp: str,
-    base_log_id: Optional[int] = None,
-    save_log: bool = True,
-) -> Dict[str, Any]:
-    # 기준행 기반 override를 적용하고 baseline/simulated를 같은 조건으로 비교
-    if lookback_hours <= 0:
-        raise HTTPException(status_code=400, detail="lookback_hours는 1 이상이어야 합니다")
-    if lookback_hours > 24 * 31:
-        raise HTTPException(status_code=400, detail="lookback_hours가 너무 큽니다(최대 744시간)")
-
-    base_dt = parse_base_timestamp(base_timestamp)
-    start_dt = base_dt - timedelta(hours=lookback_hours)
-
-    try:
-        runner = store.get_runner(device_id)
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-
-    raw = _load_simulation_raw(device_id=device_id, start_dt=start_dt, end_dt=base_dt)
-    baseline_raw = raw.copy()
-
-    editable_fields = resolve_editable_raw_fields(runner.feature_cols, list(raw.columns))
-    allowed_fields = set(editable_fields)
-    requested_overrides = overrides or {}
-    invalid_fields = sorted(set(requested_overrides.keys()) - allowed_fields)
-    if invalid_fields:
-        raise HTTPException(status_code=400, detail=f"허용되지 않은 override 컬럼: {invalid_fields}")
-
+def _resolve_simulation_target(raw: pd.DataFrame, base_log_id: Optional[int]) -> tuple[int, Any]:
+    """시뮬레이션 기준 row 인덱스와 기준 시각을 결정한다."""
     if base_log_id is not None and "LOG_ID" in raw.columns:
         candidates = raw[raw["LOG_ID"] == int(base_log_id)]
         if candidates.empty:
@@ -362,105 +352,132 @@ def run_simulation(
     target_ts = raw.loc[target_idx, "LOG_DT"]
     if pd.isna(target_ts):
         raise HTTPException(status_code=404, detail="시뮬레이션 기준 시점을 찾지 못했습니다")
+    return int(target_idx), target_ts
 
+
+def _validate_simulation_overrides(
+    requested_overrides: Dict[str, float],
+    editable_fields: List[str],
+) -> Dict[str, float]:
+    """허용된 override 컬럼만 남기고 잘못된 입력은 400으로 차단한다."""
+    allowed_fields = set(editable_fields)
+    invalid_fields = sorted(set(requested_overrides.keys()) - allowed_fields)
+    if invalid_fields:
+        raise HTTPException(status_code=400, detail=f"허용되지 않은 override 컬럼: {invalid_fields}")
+    return requested_overrides
+
+
+def _collect_effective_overrides(
+    raw: pd.DataFrame,
+    target_idx: int,
+    requested_overrides: Dict[str, float],
+) -> Dict[str, float]:
+    """기준 row 대비 실제로 값이 바뀌는 override만 추린다."""
     effective_overrides: Dict[str, float] = {}
     for field, value in requested_overrides.items():
         if field not in raw.columns:
             continue
         current_value = raw.loc[target_idx, field]
-        if pd.isna(current_value):
+        if pd.isna(current_value) or abs(float(current_value) - float(value)) > 1e-9:
             effective_overrides[field] = float(value)
-            continue
-        if abs(float(current_value) - float(value)) > 1e-9:
-            effective_overrides[field] = float(value)
+    return effective_overrides
 
-    # 리샘플(mean) 기반 입력에서 단일 raw 행만 바꾸면 변화가 매우 작을 수 있어,
-    # 선택 기준행이 속한 리샘플 bin 전체에 override를 적용한다.
-    target_ts_norm = pd.Timestamp(target_ts)
-    if target_ts_norm.tzinfo is not None:
-        target_ts_norm = target_ts_norm.tz_convert("UTC").tz_localize(None)
 
+def _build_simulation_bin_mask(raw: pd.DataFrame, target_ts: Any) -> pd.Series:
+    """기준 시각이 속한 리샘플 bin 전체를 찾고, 없으면 기준 row만 선택한다."""
+    target_ts_norm = _to_naive_timestamp(target_ts)
     resample_rule = PreprocessConfig().resample_rule
     normalized_rule = re.sub(r"(?i)(\d+)t$", r"\1min", str(resample_rule or "15min"))
     bin_start = target_ts_norm.floor(normalized_rule)
-    bin_step = pd.to_timedelta(normalized_rule)
-    bin_end = bin_start + bin_step
-    bin_mask = (pd.to_datetime(raw["LOG_DT"], errors="coerce") >= bin_start) & (pd.to_datetime(raw["LOG_DT"], errors="coerce") < bin_end)
+    bin_end = bin_start + pd.to_timedelta(normalized_rule)
+    bin_mask = (
+        (pd.to_datetime(raw["LOG_DT"], errors="coerce") >= bin_start)
+        & (pd.to_datetime(raw["LOG_DT"], errors="coerce") < bin_end)
+    )
+    return bin_mask
 
-    # 안전장치: bin 마스크가 비었으면 기존처럼 target_idx 단일 행에 적용
-    if not bool(bin_mask.any()):
-        bin_mask = (raw.index == target_idx)
 
-    for field, value in effective_overrides.items():
+def _apply_overrides_to_bin(raw: pd.DataFrame, bin_mask: pd.Series, overrides: Dict[str, float]) -> None:
+    """선택된 리샘플 bin 전체에 override 값을 반영한다."""
+    for field, value in overrides.items():
         raw.loc[bin_mask, field] = value
 
-    pcfg = PreprocessConfig()
-    baseline_meta = preprocess_raw_df_to_supervised(raw=baseline_raw, pcfg=pcfg, persist_outputs=False)
-    baseline = predict_from_preprocessed(
+
+def _predict_simulation_pair(
+    device_id: str,
+    runner,
+    baseline_raw: pd.DataFrame,
+    simulated_raw: pd.DataFrame,
+    target_ts: Any,
+    effective_overrides: Dict[str, float],
+) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    """같은 기준 시각으로 baseline과 simulated 예측을 함께 계산한다."""
+    baseline = predict_from_raw_history(
         device_id=device_id,
         runner=runner,
-        meta=baseline_meta,
+        raw=baseline_raw,
         max_data_age_hours=24,
         enforce_freshness=False,
         reference_timestamp=target_ts,
     )
+    if not effective_overrides:
+        return baseline, baseline
 
-    if effective_overrides:
-        simulated_meta = preprocess_raw_df_to_supervised(raw=raw, pcfg=pcfg, persist_outputs=False)
-        simulated = predict_from_preprocessed(
-            device_id=device_id,
-            runner=runner,
-            meta=simulated_meta,
-            max_data_age_hours=24,
-            enforce_freshness=False,
-            reference_timestamp=target_ts,
-        )
-    else:
-        simulated = baseline
+    simulated = predict_from_raw_history(
+        device_id=device_id,
+        runner=runner,
+        raw=simulated_raw,
+        max_data_age_hours=24,
+        enforce_freshness=False,
+        reference_timestamp=target_ts,
+    )
+    return baseline, simulated
 
-    base_pred = baseline["preds"][0] if baseline.get("preds") else {}
-    sim_pred = simulated["preds"][0] if simulated.get("preds") else {}
 
-    y15_base = float(base_pred.get("y_15_pred", 0.0))
-    y30_base = float(base_pred.get("y_30_pred", 0.0))
-    y15_sim = float(sim_pred.get("y_15_pred", 0.0))
-    y30_sim = float(sim_pred.get("y_30_pred", 0.0))
+def _extract_prediction_values(pred_result: Dict[str, Any]) -> tuple[float, float]:
+    """예측 응답에서 15분/30분 전력값을 안전하게 꺼낸다."""
+    pred = pred_result["preds"][0] if pred_result.get("preds") else {}
+    return float(pred.get("y_15_pred", 0.0)), float(pred.get("y_30_pred", 0.0))
 
-    # 입력 영향도: 변경된 각 필드별로 단일 override 예측을 수행해 변화율 산출
+
+def _build_input_influence(
+    device_id: str,
+    runner,
+    baseline_raw: pd.DataFrame,
+    bin_mask: pd.Series,
+    effective_overrides: Dict[str, float],
+    target_ts: Any,
+    y15_base: float,
+    y30_base: float,
+) -> Dict[str, float]:
+    """각 override 컬럼이 예측에 미치는 상대 영향도를 계산한다."""
     input_influence: Dict[str, float] = {}
-    if effective_overrides:
-        for _field, _value in effective_overrides.items():
-            try:
-                _single_raw = baseline_raw.copy()
-                _single_raw.loc[bin_mask, _field] = _value
-                _sm = preprocess_raw_df_to_supervised(raw=_single_raw, pcfg=pcfg, persist_outputs=False)
-                _sp = predict_from_preprocessed(
-                    device_id=device_id,
-                    runner=runner,
-                    meta=_sm,
-                    max_data_age_hours=24,
-                    enforce_freshness=False,
-                    reference_timestamp=target_ts,
-                )
-                _sp_pred = _sp["preds"][0] if _sp.get("preds") else {}
-                _y15 = float(_sp_pred.get("y_15_pred", 0.0))
-                _y30 = float(_sp_pred.get("y_30_pred", 0.0))
-                _pct15 = 0.0 if y15_base == 0 else (_y15 - y15_base) / abs(y15_base) * 100.0
-                _pct30 = 0.0 if y30_base == 0 else (_y30 - y30_base) / abs(y30_base) * 100.0
-                input_influence[_field] = round(max(abs(_pct15), abs(_pct30)), 4)
-            except Exception:
-                input_influence[_field] = 0.0
+    for field, value in effective_overrides.items():
+        try:
+            single_raw = baseline_raw.copy()
+            single_raw.loc[bin_mask, field] = value
+            single_pred = predict_from_raw_history(
+                device_id=device_id,
+                runner=runner,
+                raw=single_raw,
+                max_data_age_hours=24,
+                enforce_freshness=False,
+                reference_timestamp=target_ts,
+            )
+            y15, y30 = _extract_prediction_values(single_pred)
+            pct15 = 0.0 if y15_base == 0 else (y15 - y15_base) / abs(y15_base) * 100.0
+            pct30 = 0.0 if y30_base == 0 else (y30 - y30_base) / abs(y30_base) * 100.0
+            input_influence[field] = round(max(abs(pct15), abs(pct30)), 4)
+        except Exception:
+            input_influence[field] = 0.0
+    return input_influence
 
-    # DB RESULT_VALUE(JSONB) 스키마에 맞춰 baseline/simulated/delta를 구성
-    result_value = {
-        "baseline": {
-            "y_15_pred": y15_base,
-            "y_30_pred": y30_base,
-        },
-        "simulated": {
-            "y_15_pred": y15_sim,
-            "y_30_pred": y30_sim,
-        },
+
+def _build_simulation_result_value(y15_base: float, y30_base: float, y15_sim: float, y30_sim: float) -> Dict[str, Any]:
+    """DB 저장용 baseline/simulated/delta JSON 구조를 만든다."""
+    return {
+        "baseline": {"y_15_pred": y15_base, "y_30_pred": y30_base},
+        "simulated": {"y_15_pred": y15_sim, "y_30_pred": y30_sim},
         "delta": {
             "y_15_pred": y15_sim - y15_base,
             "y_30_pred": y30_sim - y30_base,
@@ -469,89 +486,149 @@ def run_simulation(
         },
     }
 
-    # 변경된 입력 컬럼별 before/after/증감 정보를 JSON 배열로 저장
+
+def _build_change_column_info(
+    baseline_raw: pd.DataFrame,
+    target_idx: int,
+    effective_overrides: Dict[str, float],
+) -> Dict[str, Any]:
+    """변경된 입력 컬럼의 before/after/delta 정보를 저장용 구조로 만든다."""
     change_rows: List[Dict[str, Any]] = []
     for field, after_value in effective_overrides.items():
         before_raw = baseline_raw.loc[target_idx, field] if field in baseline_raw.columns else None
         before_value = None if pd.isna(before_raw) else float(before_raw)
         after_num = float(after_value)
         delta_value = None if before_value is None else (after_num - before_value)
-        delta_pct = (
-            None
-            if before_value is None or before_value == 0
-            else ((after_num - before_value) / abs(before_value) * 100.0)
+        delta_pct = None if before_value is None or before_value == 0 else ((after_num - before_value) / abs(before_value) * 100.0)
+        change_rows.append(
+            {
+                "feature_name": field,
+                "before_value": before_value,
+                "after_value": after_num,
+                "delta_value": delta_value,
+                "delta_pct": delta_pct,
+            }
         )
-        change_rows.append({
-            "feature_name": field,
-            "before_value": before_value,
-            "after_value": after_num,
-            "delta_value": delta_value,
-            "delta_pct": delta_pct,
-        })
+    return {"changes": change_rows}
 
-    change_column_info = {"changes": change_rows}
 
-    # XGB 모델 사용 시 gain 기반 피처 중요도를 기록(기타 모델은 빈 배열 유지)
+def _save_simulation_log(
+    device_id: str,
+    target_ts: Any,
+    lookback_hours: int,
+    runner,
+    editable_fields: List[str],
+    effective_overrides: Dict[str, float],
+    result_value: Dict[str, Any],
+    change_column_info: Dict[str, Any],
+) -> None:
+    """실제 변경이 있을 때만 시뮬레이션 결과 로그를 저장한다."""
+    if len(effective_overrides) == 0:
+        logger.info(f"[AI 시뮬레이션] 저장 스킵(변경값 없음) device_id={device_id}, lookback_hours={lookback_hours}")
+        return
+
     feature_importance = {
         "model_name": str(runner.best_model),
-        "importance_method": "gain",
+        "importance_method": "not_supported",
         "features": [],
     }
-    if str(runner.model_type).upper() == "XGB":
-        try:
-            booster = runner.model_obj["15"].get_booster()
-            raw_scores = booster.get_score(importance_type="gain")
-            scored_features: List[Dict[str, Any]] = []
-            for key, value in raw_scores.items():
-                feature_name = key
-                if isinstance(key, str) and key.startswith("f") and key[1:].isdigit():
-                    idx = int(key[1:])
-                    if 0 <= idx < len(runner.feature_cols):
-                        feature_name = runner.feature_cols[idx]
-                scored_features.append({
-                    "feature_name": feature_name,
-                    "importance_value": float(value),
-                })
 
-            scored_features = sorted(scored_features, key=lambda item: item["importance_value"], reverse=True)
-            feature_importance["features"] = [
-                {
-                    "rank": rank,
-                    "feature_name": item["feature_name"],
-                    "importance_value": item["importance_value"],
-                }
-                for rank, item in enumerate(scored_features, start=1)
-            ]
-        except Exception as e:
-            logger.warning(f"[AI 시뮬레이션] feature importance 추출 실패: {e}")
-
-    # 저장 요청(save_log=true)이고 실제 변경값이 있을 때만 시뮬 로그를 적재
-    if save_log and len(effective_overrides) > 0:
-        db_gen = db_connection_pool()
-        db = next(db_gen)
+    db_gen = db_connection_pool()
+    db = next(db_gen)
+    try:
+        BaseQueryFactory(db, TB_SIMULATION_LOG).insert_single_row(
+            device_id=device_id,
+            baseline_pd_time=pd.Timestamp(target_ts).to_pydatetime(),
+            search_time=int(lookback_hours),
+            use_model=str(runner.best_model),
+            available_feature=len(editable_fields),
+            change_feature=len(effective_overrides),
+            result_value=result_value,
+            change_column_info=change_column_info,
+            feature_importance=feature_importance,
+        )
+    except Exception as e:
+        logger.error(f"[AI 시뮬레이션] 결과 저장 실패 device_id={device_id}: {e}")
+    finally:
         try:
-            BaseQueryFactory(db, TB_SIMULATION_LOG).insert_single_row(
-                device_id=device_id,
-                baseline_pd_time=pd.Timestamp(target_ts).to_pydatetime(),
-                search_time=int(lookback_hours),
-                use_model=str(runner.best_model),
-                available_feature=len(editable_fields),
-                change_feature=len(effective_overrides),
-                result_value=result_value,
-                change_column_info=change_column_info,
-                feature_importance=feature_importance,
-            )
-        except Exception as e:
-            logger.error(f"[AI 시뮬레이션] 결과 저장 실패 device_id={device_id}: {e}")
-        finally:
-            try:
-                next(db_gen)
-            except StopIteration:
-                pass
-    # 저장 요청은 있었지만 변경값이 없으면 로그 적재를 생략
-    elif save_log:
-        logger.info(
-            f"[AI 시뮬레이션] 저장 스킵(변경값 없음) device_id={device_id}, lookback_hours={lookback_hours}"
+            next(db_gen)
+        except StopIteration:
+            pass
+
+
+def _prepare_simulation_inputs(
+    device_id: str,
+    lookback_hours: int,
+    base_timestamp: str,
+    base_log_id: Optional[int],
+):
+    """시뮬레이션 실행에 필요한 runner/raw/기준 row/override 범위를 한 번에 준비한다."""
+    base_dt = parse_base_timestamp(base_timestamp)
+    start_dt = base_dt - timedelta(hours=lookback_hours)
+    runner = _get_runner(device_id)
+    raw = _load_simulation_raw(device_id=device_id, start_dt=start_dt, end_dt=base_dt)
+    baseline_raw = raw.copy()
+    editable_fields = resolve_editable_raw_fields(runner.feature_cols, list(raw.columns))
+    target_idx, target_ts = _resolve_simulation_target(raw, base_log_id)
+    return runner, raw, baseline_raw, editable_fields, target_idx, target_ts
+
+
+def run_simulation(
+    device_id: str,
+    overrides: Dict[str, float],
+    lookback_hours: int,
+    base_timestamp: str,
+    base_log_id: Optional[int] = None,
+    save_log: bool = True,
+) -> Dict[str, Any]:
+    """기준 row override를 반영해 baseline과 simulated 예측을 비교한다."""
+    _validate_lookback_hours(lookback_hours)
+    runner, raw, baseline_raw, editable_fields, target_idx, target_ts = _prepare_simulation_inputs(
+        device_id=device_id,
+        lookback_hours=lookback_hours,
+        base_timestamp=base_timestamp,
+        base_log_id=base_log_id,
+    )
+    requested_overrides = _validate_simulation_overrides(overrides or {}, editable_fields)
+    effective_overrides = _collect_effective_overrides(raw, target_idx, requested_overrides)
+    bin_mask = _build_simulation_bin_mask(raw, target_ts)
+    if not bool(bin_mask.any()):
+        bin_mask = (raw.index == target_idx)
+    _apply_overrides_to_bin(raw, bin_mask, effective_overrides)
+
+    baseline, simulated = _predict_simulation_pair(
+        device_id=device_id,
+        runner=runner,
+        baseline_raw=baseline_raw,
+        simulated_raw=raw,
+        target_ts=target_ts,
+        effective_overrides=effective_overrides,
+    )
+    y15_base, y30_base = _extract_prediction_values(baseline)
+    y15_sim, y30_sim = _extract_prediction_values(simulated)
+
+    input_influence = _build_input_influence(
+        device_id=device_id,
+        runner=runner,
+        baseline_raw=baseline_raw,
+        bin_mask=bin_mask,
+        effective_overrides=effective_overrides,
+        target_ts=target_ts,
+        y15_base=y15_base,
+        y30_base=y30_base,
+    )
+    result_value = _build_simulation_result_value(y15_base, y30_base, y15_sim, y30_sim)
+    change_column_info = _build_change_column_info(baseline_raw, target_idx, effective_overrides)
+    if save_log:
+        _save_simulation_log(
+            device_id=device_id,
+            target_ts=target_ts,
+            lookback_hours=lookback_hours,
+            runner=runner,
+            editable_fields=editable_fields,
+            effective_overrides=effective_overrides,
+            result_value=result_value,
+            change_column_info=change_column_info,
         )
 
     return {

@@ -22,14 +22,9 @@ from db.public.models import (
 )
 from infrastructure.queryFactory.base_orm import BaseQueryFactory
 from setting.database_orm import db_connection_pool
-from service.prediction_service import (
-    MODEL_ROOT,
-    list_model_device_ids,
-    predict_from_preprocessed,
-    store,
-)
-from service.processing.config import PreprocessConfig
-from service.processing.pipeline import fetch_pems_pro_log_df, preprocess_pems_pro_from_db_in_memory
+from service.model_input_utils import add_current_model_aliases, list_model_device_ids
+from service.prediction_service import MODEL_ROOT, predict_from_raw_history, store
+from service.processing.pipeline import fetch_pems_pro_log_df
 
 
 _MILP_TIME_BUCKET_MINUTES = 5
@@ -41,6 +36,9 @@ _LOG_ID_SNAPSHOT_CACHE: Dict[Any, Dict[str, int]] = {}
 _MILP_INPUT_CACHE: Dict[Any, Dict[str, Any]] = {}
 
 
+# ---------------------------------------------------------------------------
+# 시간/캐시 공통 유틸
+# ---------------------------------------------------------------------------
 def _floor_time(dt: datetime, bucket_minutes: int) -> datetime:
     if bucket_minutes <= 0:
         return dt.replace(second=0, microsecond=0)
@@ -124,100 +122,53 @@ def _get_or_create_milp_inputs(
     return data
 
 
-def solve_test_milp(
-    gains_kw: List[float],
-    costs: List[float],
-    budget: float,
-    max_actions: Optional[int] = None,
-    mandatory_indices: Optional[List[int]] = None,
-) -> Dict[str, Any]:
-    """간단한 0/1 MILP 테스트 문제를 푼다."""
-    if len(gains_kw) != len(costs):
-        raise ValueError("gains_kw와 costs 길이는 같아야 합니다")
-    if len(gains_kw) == 0:
-        raise ValueError("최소 1개 이상의 항목이 필요합니다")
-    if budget < 0:
-        raise ValueError("budget은 0 이상이어야 합니다")
-
-    gains = np.asarray(gains_kw, dtype=float)
-    cost_values = np.asarray(costs, dtype=float)
-
-    if np.any(gains < 0):
-        raise ValueError("gains_kw 값은 음수가 될 수 없습니다")
-    if np.any(cost_values < 0):
-        raise ValueError("costs 값은 음수가 될 수 없습니다")
-
-    n = len(gains_kw)
-    must_indices = mandatory_indices or []
-    for idx in must_indices:
-        if idx < 0 or idx >= n:
-            raise ValueError(f"mandatory_indices 범위를 벗어났습니다: {idx}")
-
-    if max_actions is not None and max_actions > n:
-        raise ValueError("max_actions는 항목 개수보다 클 수 없습니다")
-
-    c = -gains
-    integrality = np.ones(n, dtype=int)
-    bounds = Bounds(lb=np.zeros(n), ub=np.ones(n))
-
-    constraints: List[LinearConstraint] = [
-        LinearConstraint(cost_values.reshape(1, -1), -np.inf, np.array([float(budget)])),
-    ]
-
-    if max_actions is not None:
-        constraints.append(
-            LinearConstraint(np.ones((1, n)), -np.inf, np.array([float(max_actions)]))
-        )
-
-    for idx in must_indices:
-        row = np.zeros((1, n))
-        row[0, idx] = 1.0
-        constraints.append(LinearConstraint(row, np.array([1.0]), np.array([1.0])))
-
-    result = milp(
-        c=c,
-        constraints=constraints,
-        integrality=integrality,
-        bounds=bounds,
-        options={"disp": False},
-    )
-
-    solution = np.asarray(result.x if result.x is not None else np.zeros(n), dtype=float)
-    selected_indices = [i for i, v in enumerate(solution) if v >= 0.5]
-
-    objective_gain_kw = float(gains[selected_indices].sum()) if selected_indices else 0.0
-    total_cost = float(cost_values[selected_indices].sum()) if selected_indices else 0.0
-
-    selected_items = [
-        {
-            "index": i,
-            "gain_kw": float(gains[i]),
-            "cost": float(cost_values[i]),
-        }
-        for i in selected_indices
-    ]
-
-    return {
-        "status": "optimal" if bool(result.success) else "failed",
-        "success": bool(result.success),
-        "message": str(result.message),
-        "objective_gain_kw": objective_gain_kw,
-        "total_cost": total_cost,
-        "selected_indices": selected_indices,
-        "selected_items": selected_items,
-        "raw_solution": [float(v) for v in solution.tolist()],
-    }
-
-
+# ---------------------------------------------------------------------------
+# 장비 메타/상태 조회
+# ---------------------------------------------------------------------------
 def _load_device_threshold(device_id: str) -> Optional[float]:
-    """장비별 threshold.json에서 피크 임계치를 읽어 반환한다.
+    """장비별 threshold를 읽어 반환한다.
 
     우선순위:
-    1) threshold_p95
-    2) threshold_meta.threshold
+    1) MODEL_ROOT/device_thresholds.json 의 p90_threshold
+    2) 개별 threshold.json 의 threshold_p95
+    3) 개별 threshold.json 의 threshold_meta.threshold
     """
-    threshold_path = Path(MODEL_ROOT) / f"device={device_id}" / "best_model" / "threshold.json"
-    if not threshold_path.exists():
+    aggregate_paths = [
+        Path(MODEL_ROOT) / "device_thresholds.json",
+        Path(MODEL_ROOT) / "regression" / "device_thresholds.json",
+    ]
+    for aggregate_path in aggregate_paths:
+        if not aggregate_path.exists():
+            continue
+        try:
+            with open(aggregate_path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+        except Exception:
+            continue
+
+        device_payload = payload.get(str(device_id))
+        if not isinstance(device_payload, dict):
+            continue
+
+        raw = device_payload.get("p90_threshold")
+        if raw is None:
+            raw = device_payload.get("threshold_p95")
+        if raw is None:
+            raw = (device_payload.get("threshold_meta") or {}).get("threshold")
+
+        try:
+            return float(raw)
+        except Exception:
+            continue
+
+    candidate_paths = [
+        Path(MODEL_ROOT) / "classification" / str(device_id) / "threshold.json",
+        Path(MODEL_ROOT) / "regression" / str(device_id) / "threshold.json",
+        Path(MODEL_ROOT) / f"device={device_id}" / "best_model" / "threshold.json",
+    ]
+
+    threshold_path = next((path for path in candidate_paths if path.exists()), None)
+    if threshold_path is None:
         return None
 
     try:
@@ -268,6 +219,9 @@ def _mean_op_status_by_device(
     return {str(k): float(v) for k, v in grouped.to_dict().items()}
 
 
+# ---------------------------------------------------------------------------
+# 문구/표시용 포맷터
+# ---------------------------------------------------------------------------
 def _format_kw_from_w(value_w: float) -> str:
     """W 단위 값을 kW 문자열(소수 2자리)로 변환한다."""
     return f"{(float(value_w) / 1000.0):.2f}"
@@ -341,6 +295,9 @@ def _load_device_company_map(device_ids: List[str]) -> Dict[str, Dict[str, Any]]
             pass
 
 
+# ---------------------------------------------------------------------------
+# 장비별 권고 문구 생성
+# ---------------------------------------------------------------------------
 def _build_single_device_fsd_text(device_row: Dict[str, Any]) -> str:
     """단일 장비 회사에서 사용할 감산 권고 문구를 생성한다."""
     recs: List[str] = []
@@ -472,7 +429,7 @@ def _predict_devices_batched(
     reference_dt: Optional[datetime] = None,
     log_id_snapshot: Optional[Dict[str, int]] = None,
 ) -> (Dict[str, Dict[str, Any]], Dict[str, str]):
-    """장비별 예측을 위한 전처리를 1회만 수행하고, 장비별로 추론을 분리 실행한다."""
+    """장비별 raw 로그를 1회 조회하고, 장비별로 current 예측을 분리 실행한다."""
     if not device_ids:
         return {}, {}
 
@@ -480,23 +437,23 @@ def _predict_devices_batched(
     end_dt = _finalized_end_dt(anchor_dt)
     start_dt = end_dt - timedelta(hours=lookback_hours)
 
-    meta = preprocess_pems_pro_from_db_in_memory(
+    raw = fetch_pems_pro_log_df(
         start_dt=start_dt,
         end_dt=end_dt,
-        pcfg=PreprocessConfig(),
         device_ids=device_ids,
         log_id_snapshot=log_id_snapshot,
     )
+    raw = add_current_model_aliases(raw)
 
     output: Dict[str, Dict[str, Any]] = {}
     failed: Dict[str, str] = {}
     for device_id in device_ids:
         try:
             runner = store.get_runner(device_id)
-            output[device_id] = predict_from_preprocessed(
+            output[device_id] = predict_from_raw_history(
                 device_id=device_id,
                 runner=runner,
-                meta=meta,
+                raw=raw,
                 max_data_age_hours=24,
                 enforce_freshness=True,
             )
@@ -555,6 +512,9 @@ def _build_distribution_text_for_device(device_row: Dict[str, Any], allocation_p
     return "\n".join(recs)
 
 
+# ---------------------------------------------------------------------------
+# 저장/직전 실행 상태
+# ---------------------------------------------------------------------------
 def _save_peak_dispatch_result(result_payload: Dict[str, Any], customer_id: Optional[str] = None) -> None:
     """피크 분배 MILP 실행 결과를 헤더/장비 상세 테이블에 저장한다."""
     db_gen = db_connection_pool()
@@ -621,26 +581,30 @@ def _save_peak_dispatch_result(result_payload: Dict[str, Any], customer_id: Opti
             pass
 
 
-def _optimize_company_group(
+# ---------------------------------------------------------------------------
+# 회사 단위 최적화 핵심
+# ---------------------------------------------------------------------------
+def _empty_company_optimization_result() -> Dict[str, Any]:
+    """최적화 대상 장비가 없을 때 사용하는 기본 응답 구조."""
+    return {
+        "devices": [],
+        "allocation_plan": [],
+        "donor_device_ids": [],
+        "idle_device_ids": [],
+        "objective_peak_sum": 0.0,
+        "total_slack": 0.0,
+    }
+
+
+def _annotate_idle_status(
     records: List[Dict[str, Any]],
     lookback_hours: int,
     idle_op_status_threshold: float,
-    reference_dt: Optional[datetime] = None,
-    log_id_snapshot: Optional[Dict[str, int]] = None,
-    op_mean_map: Optional[Dict[str, float]] = None,
-) -> Dict[str, Any]:
-    """회사(고객) 단위로 피크 분배를 수행한다. 단일 장비면 FSD 감산 권고로 대체한다."""
-    if not records:
-        return {
-            "devices": [],
-            "allocation_plan": [],
-            "donor_device_ids": [],
-            "idle_device_ids": [],
-            "objective_peak_sum": 0.0,
-            "total_slack": 0.0,
-        }
-
-    anchor_dt = reference_dt or datetime.now()
+    anchor_dt: datetime,
+    log_id_snapshot: Optional[Dict[str, int]],
+    op_mean_map: Optional[Dict[str, float]],
+) -> None:
+    """각 장비에 평균 OP_STATUS와 idle 여부를 기록한다."""
     if op_mean_map is None:
         op_mean_map = _mean_op_status_by_device(
             [r["device_id"] for r in records],
@@ -653,31 +617,91 @@ def _optimize_company_group(
         row["op_status_mean"] = op_mean
         row["is_idle"] = op_mean <= idle_op_status_threshold
 
-    # 단일 장비 회사: 타 장비 분배 대신 FSD 감산 권고를 생성
-    if len(records) == 1:
-        row = records[0]
+
+def _build_single_device_result(row: Dict[str, Any], anchor_dt: datetime) -> Dict[str, Any]:
+    """단일 장비 회사의 FSD 감산 권고 결과를 만든다."""
+    base15 = float(row["p15"])
+    base30 = float(row["p30"])
+    threshold = float(row["threshold"])
+    prev_state = _load_last_device_dispatch_state(row["device_id"])
+    prev_req15 = float((prev_state or {}).get("required_shift_15", 0.0))
+    prev_req30 = float((prev_state or {}).get("required_shift_30", 0.0))
+    prev_created_at = (prev_state or {}).get("created_at")
+
+    required15 = _stable_single_device_shift(
+        base=base15,
+        threshold=threshold,
+        prev_required_shift=prev_req15,
+        prev_created_at=prev_created_at,
+        reference_dt=anchor_dt,
+    )
+    required30 = _stable_single_device_shift(
+        base=base30,
+        threshold=threshold,
+        prev_required_shift=prev_req30,
+        prev_created_at=prev_created_at,
+        reference_dt=anchor_dt,
+    )
+
+    device_out = {
+        "device_id": row["device_id"],
+        "company_name": row.get("company_name"),
+        "customer_id": row.get("customer_id"),
+        "drive_mode": row.get("drive_mode"),
+        "horse_power": row.get("horse_power"),
+        "is_donor": True,
+        "is_idle": bool(row["is_idle"]),
+        "op_status_mean": float(row["op_status_mean"]),
+        "threshold": threshold,
+        "baseline_15": base15,
+        "baseline_30": base30,
+        "optimized_15": base15 - required15,
+        "optimized_30": base30 - required30,
+        "delta_15": -required15,
+        "delta_30": -required30,
+        "shift_in_15": 0.0,
+        "shift_in_30": 0.0,
+        "shift_out_15": required15,
+        "shift_out_30": required30,
+        "required_shift_15": required15,
+        "required_shift_30": required30,
+        "distributed_targets_15": [],
+        "distributed_targets_30": [],
+        "distribution_text": None,
+        "slack_15": 0.0,
+        "slack_30": 0.0,
+    }
+    device_out["distribution_text"] = _build_single_device_fsd_text(device_out)
+    return {
+        "devices": [device_out],
+        "allocation_plan": [],
+        "donor_device_ids": [row["device_id"]],
+        "idle_device_ids": ([row["device_id"]] if row["is_idle"] else []),
+        "objective_peak_sum": float(device_out["optimized_15"] + device_out["optimized_30"]),
+        "total_slack": 0.0,
+    }
+
+
+def _select_donor_candidates(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """VSD 장비를 우선순위에 따라 donor 후보로 고른다."""
+    donor_candidates = [
+        row for row in records
+        if str(row.get("drive_mode") or "").upper() == "VSD" and not row["is_idle"]
+    ]
+    if donor_candidates:
+        return donor_candidates
+    return [row for row in records if str(row.get("drive_mode") or "").upper() == "VSD"]
+
+
+def _build_non_vsd_company_result(records: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """회사 내 VSD가 없을 때 장비별 제어 권고만 반환한다."""
+    devices_out: List[Dict[str, Any]] = []
+    for row in records:
         base15 = float(row["p15"])
         base30 = float(row["p30"])
         threshold = float(row["threshold"])
-        prev_state = _load_last_device_dispatch_state(row["device_id"])
-        prev_req15 = float((prev_state or {}).get("required_shift_15", 0.0))
-        prev_req30 = float((prev_state or {}).get("required_shift_30", 0.0))
-        prev_created_at = (prev_state or {}).get("created_at")
-
-        required15 = _stable_single_device_shift(
-            base=base15,
-            threshold=threshold,
-            prev_required_shift=prev_req15,
-            prev_created_at=prev_created_at,
-            reference_dt=anchor_dt,
-        )
-        required30 = _stable_single_device_shift(
-            base=base30,
-            threshold=threshold,
-            prev_required_shift=prev_req30,
-            prev_created_at=prev_created_at,
-            reference_dt=anchor_dt,
-        )
+        required15 = float(max(0.0, base15 - threshold))
+        required30 = float(max(0.0, base30 - threshold))
 
         device_out = {
             "device_id": row["device_id"],
@@ -685,102 +709,93 @@ def _optimize_company_group(
             "customer_id": row.get("customer_id"),
             "drive_mode": row.get("drive_mode"),
             "horse_power": row.get("horse_power"),
-            "is_donor": True,
+            "is_donor": False,
             "is_idle": bool(row["is_idle"]),
             "op_status_mean": float(row["op_status_mean"]),
             "threshold": threshold,
             "baseline_15": base15,
             "baseline_30": base30,
-            "optimized_15": base15 - required15,
-            "optimized_30": base30 - required30,
-            "delta_15": -required15,
-            "delta_30": -required30,
+            "optimized_15": base15,
+            "optimized_30": base30,
+            "delta_15": 0.0,
+            "delta_30": 0.0,
             "shift_in_15": 0.0,
             "shift_in_30": 0.0,
-            "shift_out_15": required15,
-            "shift_out_30": required30,
+            "shift_out_15": 0.0,
+            "shift_out_30": 0.0,
             "required_shift_15": required15,
             "required_shift_30": required30,
             "distributed_targets_15": [],
             "distributed_targets_30": [],
             "distribution_text": None,
-            "slack_15": 0.0,
-            "slack_30": 0.0,
+            "slack_15": required15,
+            "slack_30": required30,
         }
         device_out["distribution_text"] = _build_single_device_fsd_text(device_out)
+        devices_out.append(device_out)
 
-        objective = float(device_out["optimized_15"] + device_out["optimized_30"])
-        return {
-            "devices": [device_out],
-            "allocation_plan": [],
-            "donor_device_ids": [row["device_id"]],
-            "idle_device_ids": ([row["device_id"]] if row["is_idle"] else []),
-            "objective_peak_sum": objective,
-            "total_slack": 0.0,
-        }
+    return {
+        "devices": devices_out,
+        "allocation_plan": [],
+        "donor_device_ids": [],
+        "idle_device_ids": [row["device_id"] for row in records if row["is_idle"]],
+        "objective_peak_sum": float(
+            max((d["baseline_15"] for d in devices_out), default=0.0)
+            + max((d["baseline_30"] for d in devices_out), default=0.0)
+        ),
+        "total_slack": float(sum(float(d["slack_15"]) + float(d["slack_30"]) for d in devices_out)),
+    }
 
-    # 다장비 회사도 먼저 구동 타입을 판별한다.
-    # 분배(연속 감산)는 VSD 장비만 donor 후보로 사용한다.
-    donor_candidates = [
-        row for row in records
-        if str(row.get("drive_mode") or "").upper() == "VSD" and not row["is_idle"]
-    ]
+
+def _build_milp_indexers(n: int, h_count: int, idle_indices: List[int]) -> Dict[str, Any]:
+    """MILP 변수 인덱스 계산기와 메타를 함께 만든다."""
+    idle_pos = {idx: pos for pos, idx in enumerate(idle_indices)}
+    u_base = 0
+    v_base = u_base + n * h_count
+    s_base = v_base + n * h_count
+    z_base = s_base + n * h_count
+    y_base = z_base + h_count
+    var_count = y_base + len(idle_indices)
+    return {
+        "idle_pos": idle_pos,
+        "var_count": var_count,
+        "u_idx": lambda i, h: u_base + i * h_count + h,
+        "v_idx": lambda i, h: v_base + i * h_count + h,
+        "s_idx": lambda i, h: s_base + i * h_count + h,
+        "z_idx": lambda h: z_base + h,
+        "y_idx": lambda i: y_base + idle_pos[i],
+    }
+
+
+def _optimize_company_group(
+    records: List[Dict[str, Any]],
+    lookback_hours: int,
+    idle_op_status_threshold: float,
+    reference_dt: Optional[datetime] = None,
+    log_id_snapshot: Optional[Dict[str, int]] = None,
+    op_mean_map: Optional[Dict[str, float]] = None,
+) -> Dict[str, Any]:
+    """회사(고객) 단위로 피크 분배를 수행한다. 단일 장비면 FSD 감산 권고로 대체한다."""
+    if not records:
+        return _empty_company_optimization_result()
+
+    anchor_dt = reference_dt or datetime.now()
+    _annotate_idle_status(
+        records=records,
+        lookback_hours=lookback_hours,
+        idle_op_status_threshold=idle_op_status_threshold,
+        anchor_dt=anchor_dt,
+        log_id_snapshot=log_id_snapshot,
+        op_mean_map=op_mean_map,
+    )
+
+    if len(records) == 1:
+        return _build_single_device_result(records[0], anchor_dt)
+
+    donor_candidates = _select_donor_candidates(records)
+
     if not donor_candidates:
-        donor_candidates = [
-            row for row in records
-            if str(row.get("drive_mode") or "").upper() == "VSD"
-        ]
-
-    # 회사 내 VSD가 없으면 분배 MILP 대신 장비별 제어 권고만 제공한다.
-    if not donor_candidates:
-        devices_out: List[Dict[str, Any]] = []
-        for row in records:
-            base15 = float(row["p15"])
-            base30 = float(row["p30"])
-            threshold = float(row["threshold"])
-
-            required15 = float(max(0.0, base15 - threshold))
-            required30 = float(max(0.0, base30 - threshold))
-
-            device_out = {
-                "device_id": row["device_id"],
-                "company_name": row.get("company_name"),
-                "customer_id": row.get("customer_id"),
-                "drive_mode": row.get("drive_mode"),
-                "horse_power": row.get("horse_power"),
-                "is_donor": False,
-                "is_idle": bool(row["is_idle"]),
-                "op_status_mean": float(row["op_status_mean"]),
-                "threshold": threshold,
-                "baseline_15": base15,
-                "baseline_30": base30,
-                "optimized_15": base15,
-                "optimized_30": base30,
-                "delta_15": 0.0,
-                "delta_30": 0.0,
-                "shift_in_15": 0.0,
-                "shift_in_30": 0.0,
-                "shift_out_15": 0.0,
-                "shift_out_30": 0.0,
-                "required_shift_15": required15,
-                "required_shift_30": required30,
-                "distributed_targets_15": [],
-                "distributed_targets_30": [],
-                "distribution_text": None,
-                "slack_15": required15,
-                "slack_30": required30,
-            }
-            device_out["distribution_text"] = _build_single_device_fsd_text(device_out)
-            devices_out.append(device_out)
-
-        return {
-            "devices": devices_out,
-            "allocation_plan": [],
-            "donor_device_ids": [],
-            "idle_device_ids": [row["device_id"] for row in records if row["is_idle"]],
-            "objective_peak_sum": float(max((d["baseline_15"] for d in devices_out), default=0.0) + max((d["baseline_30"] for d in devices_out), default=0.0)),
-            "total_slack": float(sum(float(d["slack_15"]) + float(d["slack_30"]) for d in devices_out)),
-        }
+        return _build_non_vsd_company_result(records)
 
     donor_candidates.sort(key=lambda r: max(r["p15"], r["p30"]), reverse=True)
     max_donor_count = max(1, min(len(donor_candidates), len(records) - 1))
@@ -793,29 +808,14 @@ def _optimize_company_group(
     h_count = 2
 
     idle_indices = [i for i, row in enumerate(records) if row["is_idle"]]
-    idle_pos = {idx: pos for pos, idx in enumerate(idle_indices)}
-
-    u_base = 0
-    v_base = u_base + n * h_count
-    s_base = v_base + n * h_count
-    z_base = s_base + n * h_count
-    y_base = z_base + h_count
-    var_count = y_base + len(idle_indices)
-
-    def u_idx(i: int, h: int) -> int:
-        return u_base + i * h_count + h
-
-    def v_idx(i: int, h: int) -> int:
-        return v_base + i * h_count + h
-
-    def s_idx(i: int, h: int) -> int:
-        return s_base + i * h_count + h
-
-    def z_idx(h: int) -> int:
-        return z_base + h
-
-    def y_idx(i: int) -> int:
-        return y_base + idle_pos[i]
+    indexers = _build_milp_indexers(n=n, h_count=h_count, idle_indices=idle_indices)
+    idle_pos = indexers["idle_pos"]
+    var_count = indexers["var_count"]
+    u_idx = indexers["u_idx"]
+    v_idx = indexers["v_idx"]
+    s_idx = indexers["s_idx"]
+    z_idx = indexers["z_idx"]
+    y_idx = indexers["y_idx"]
 
     p = np.array([[row["p15"], row["p30"]] for row in records], dtype=float)
     th = np.array([row["threshold"] for row in records], dtype=float)
@@ -922,6 +922,8 @@ def _optimize_company_group(
                 "device_id": row["device_id"],
                 "company_name": row.get("company_name"),
                 "customer_id": row.get("customer_id"),
+                "drive_mode": row.get("drive_mode"),
+                "horse_power": row.get("horse_power"),
                 "is_donor": bool(row["is_donor"]),
                 "is_idle": bool(row["is_idle"]),
                 "op_status_mean": float(row["op_status_mean"]),
@@ -998,8 +1000,13 @@ def _optimize_company_group(
     allocate_for_horizon(h_idx=0, minute=15)
     allocate_for_horizon(h_idx=1, minute=30)
 
+    all_vsd = all(str(row.get("drive_mode") or "").upper() == "VSD" for row in records)
+
     for item in devices_out:
-        if bool(item.get("is_donor")):
+        if all_vsd:
+            # 전 장비 VSD인 경우 각 장비별 독립적인 VSD 제어 권고 문구 생성
+            item["distribution_text"] = _build_single_device_fsd_text(item)
+        elif bool(item.get("is_donor")):
             item["distribution_text"] = _build_distribution_text_for_device(item, allocation_plan)
         else:
             item["distribution_text"] = "분배원 장비가 아니므로 추천 분배 문구 대상이 아닙니다."
@@ -1014,14 +1021,8 @@ def _optimize_company_group(
     }
 
 
-def optimize_peak_dispatch_test(
-    lookback_hours: int = 24,
-    customer_id: Optional[str] = None,
-    idle_op_status_threshold: float = 0.05,
-) -> Dict[str, Any]:
-    """회사별로 장비를 나눠 피크 분배를 수행한다(단일 장비 회사는 FSD 감산 권고)."""
-    total_start = time.perf_counter()
-
+def _validate_optimization_inputs(lookback_hours: int, idle_op_status_threshold: float) -> None:
+    """최적화 API의 기본 입력 범위를 검증한다."""
     if lookback_hours <= 0:
         raise ValueError("lookback_hours는 1 이상이어야 합니다")
     if lookback_hours > 24 * 31:
@@ -1029,13 +1030,44 @@ def optimize_peak_dispatch_test(
     if idle_op_status_threshold < 0 or idle_op_status_threshold > 1:
         raise ValueError("idle_op_status_threshold는 0~1 범위여야 합니다")
 
-    device_ids = list_model_device_ids()
-    if not device_ids:
-        raise ValueError("모델 장비가 없습니다")
 
+def _normalize_customer_id(customer_id: Optional[str]) -> str:
+    """선택된 회사 ID를 UUID 문자열로 정규화한다."""
+    selected_customer_id = (customer_id or "").strip()
+    if not selected_customer_id:
+        return ""
+
+    try:
+        return str(uuid.UUID(selected_customer_id))
+    except ValueError as e:
+        raise ValueError(f"CUSTOMER_ID는 UUID 형식이어야 합니다: {selected_customer_id}") from e
+
+
+def _filter_device_ids_by_customer(device_ids: List[str], customer_id: str) -> List[str]:
+    """선택된 회사에 속한 장비만 남긴다."""
+    if not customer_id:
+        return device_ids
+
+    all_company_map = _load_device_company_map(device_ids)
+    normalized_target = customer_id.casefold()
+    filtered = [
+        device_id
+        for device_id in device_ids
+        if str((all_company_map.get(device_id) or {}).get("customer_id") or "").strip().casefold() == normalized_target
+    ]
+    if not filtered:
+        raise ValueError(f"입력한 CUSTOMER_ID에 해당하는 장비를 찾을 수 없습니다: {customer_id}")
+    return filtered
+
+
+def _collect_prediction_records(
+    device_ids: List[str],
+    lookback_hours: int,
+    anchor_dt: datetime,
+) -> tuple[list[dict[str, Any]], list[dict[str, str]], dict[str, float], dict[str, float]]:
+    """threshold와 예측 결과를 모아 최적화 입력 records를 구성한다."""
     records: List[Dict[str, Any]] = []
     skipped: List[Dict[str, str]] = []
-    anchor_dt = _floor_time(datetime.now(), _MILP_TIME_BUCKET_MINUTES)
 
     threshold_start = time.perf_counter()
     threshold_map: Dict[str, float] = {}
@@ -1060,7 +1092,6 @@ def optimize_peak_dispatch_test(
     )
 
     predict_start = time.perf_counter()
-
     company_map = _load_device_company_map(list(threshold_map.keys()))
 
     for device_id, threshold in threshold_map.items():
@@ -1099,16 +1130,89 @@ def optimize_peak_dispatch_test(
         f"[MILP] prediction stage done: records={len(records)}, "
         f"elapsed={time.perf_counter() - predict_start:.2f}s"
     )
+    return records, skipped, threshold_map, op_mean_map
 
-    selected_customer_id = (customer_id or "").strip()
-    if selected_customer_id:
-        normalized_target = selected_customer_id.casefold()
-        records = [
-            r for r in records
-            if str(r.get("customer_id") or "").strip().casefold() == normalized_target
-        ]
-        if not records:
-            raise ValueError(f"입력한 CUSTOMER_ID에 해당하는 장비를 찾을 수 없습니다: {selected_customer_id}")
+
+def _build_slim_result_payload(result_payload: Dict[str, Any]) -> Dict[str, Any]:
+    """웹 대시보드가 실제로 쓰는 경량 MILP 응답을 만든다."""
+    allocation_plan = result_payload.get("allocation_plan") or []
+    devices_out = result_payload.get("devices") or []
+
+    slim_allocation_plan = [
+        {
+            "minute": int(a.get("minute", 0)),
+            "from_device_id": a.get("from_device_id"),
+            "to_device_id": a.get("to_device_id"),
+            "power_w": float(a.get("power_w", 0.0)),
+        }
+        for a in allocation_plan
+    ]
+
+    slim_devices = [
+        {
+            "device_id": str(d.get("device_id")),
+            "is_donor": bool(d.get("is_donor", False)),
+            "threshold": float(d.get("threshold", 0.0)),
+            "baseline_15": float(d.get("baseline_15", 0.0)),
+            "baseline_30": float(d.get("baseline_30", 0.0)),
+            "shift_out_15": float(d.get("shift_out_15", 0.0)),
+            "shift_out_30": float(d.get("shift_out_30", 0.0)),
+            "distribution_text": d.get("distribution_text"),
+        }
+        for d in devices_out
+    ]
+
+    peak_15_before = float(result_payload.get("peak_15_before", 0.0))
+    peak_15_after = float(result_payload.get("peak_15_after", 0.0))
+    peak_30_before = float(result_payload.get("peak_30_before", 0.0))
+    peak_30_after = float(result_payload.get("peak_30_after", 0.0))
+
+    return {
+        "status": str(result_payload.get("status", "unknown")),
+        "success": bool(result_payload.get("success", False)),
+        "message": result_payload.get("message"),
+        "device_count": int(result_payload.get("device_count", 0)),
+        "donor_device_ids": result_payload.get("donor_device_ids") or [],
+        "idle_device_ids": result_payload.get("idle_device_ids") or [],
+        "peak_15_reduction": peak_15_before - peak_15_after,
+        "peak_15_reduction_pct": (
+            0.0 if peak_15_before == 0.0 else ((peak_15_before - peak_15_after) / peak_15_before * 100.0)
+        ),
+        "peak_30_reduction": peak_30_before - peak_30_after,
+        "peak_30_reduction_pct": (
+            0.0 if peak_30_before == 0.0 else ((peak_30_before - peak_30_after) / peak_30_before * 100.0)
+        ),
+        "allocation_plan": slim_allocation_plan,
+        "devices": slim_devices,
+        "skipped_devices": result_payload.get("skipped_devices") or [],
+    }
+
+
+# ---------------------------------------------------------------------------
+# 공개 엔트리포인트
+# ---------------------------------------------------------------------------
+def optimize_peak_dispatch_test(
+    lookback_hours: int = 24,
+    customer_id: Optional[str] = None,
+    idle_op_status_threshold: float = 0.05,
+) -> Dict[str, Any]:
+    """회사별로 장비를 나눠 피크 분배를 수행한다(단일 장비 회사는 FSD 감산 권고)."""
+    total_start = time.perf_counter()
+
+    _validate_optimization_inputs(lookback_hours, idle_op_status_threshold)
+    selected_customer_id = _normalize_customer_id(customer_id)
+
+    device_ids = list_model_device_ids(MODEL_ROOT)
+    if not device_ids:
+        raise ValueError("모델 장비가 없습니다")
+
+    device_ids = _filter_device_ids_by_customer(device_ids, selected_customer_id)
+    anchor_dt = _floor_time(datetime.now(), _MILP_TIME_BUCKET_MINUTES)
+    records, skipped, _, op_mean_map = _collect_prediction_records(
+        device_ids=device_ids,
+        lookback_hours=lookback_hours,
+        anchor_dt=anchor_dt,
+    )
 
     if len(records) < 1:
         raise ValueError("최적화 가능한 장비가 없습니다")
@@ -1189,62 +1293,7 @@ def optimize_peak_dispatch_test(
         "company_summaries": company_summaries,
     }
 
-    # 웹 대시보드가 실제로 사용하는 필드만 추려 경량 응답으로 반환
-    slim_allocation_plan = [
-        {
-            "minute": int(a.get("minute", 0)),
-            "from_device_id": a.get("from_device_id"),
-            "to_device_id": a.get("to_device_id"),
-            "power_w": float(a.get("power_w", 0.0)),
-        }
-        for a in allocation_plan
-    ]
-
-    slim_devices = [
-        {
-            "device_id": str(d.get("device_id")),
-            "is_donor": bool(d.get("is_donor", False)),
-            "threshold": float(d.get("threshold", 0.0)),
-            "baseline_15": float(d.get("baseline_15", 0.0)),
-            "baseline_30": float(d.get("baseline_30", 0.0)),
-            "shift_out_15": float(d.get("shift_out_15", 0.0)),
-            "shift_out_30": float(d.get("shift_out_30", 0.0)),
-            "distribution_text": d.get("distribution_text"),
-        }
-        for d in devices_out
-    ]
-
-    slim_payload = {
-        "status": str(result_payload.get("status", "unknown")),
-        "success": bool(result_payload.get("success", False)),
-        "message": result_payload.get("message"),
-        "device_count": int(result_payload.get("device_count", 0)),
-        "donor_device_ids": result_payload.get("donor_device_ids") or [],
-        "idle_device_ids": result_payload.get("idle_device_ids") or [],
-        "peak_15_reduction": float(result_payload.get("peak_15_before", 0.0)) - float(result_payload.get("peak_15_after", 0.0)),
-        "peak_15_reduction_pct": (
-            0.0
-            if float(result_payload.get("peak_15_before", 0.0)) == 0.0
-            else (
-                (float(result_payload.get("peak_15_before", 0.0)) - float(result_payload.get("peak_15_after", 0.0)))
-                / float(result_payload.get("peak_15_before", 0.0))
-                * 100.0
-            )
-        ),
-        "peak_30_reduction": float(result_payload.get("peak_30_before", 0.0)) - float(result_payload.get("peak_30_after", 0.0)),
-        "peak_30_reduction_pct": (
-            0.0
-            if float(result_payload.get("peak_30_before", 0.0)) == 0.0
-            else (
-                (float(result_payload.get("peak_30_before", 0.0)) - float(result_payload.get("peak_30_after", 0.0)))
-                / float(result_payload.get("peak_30_before", 0.0))
-                * 100.0
-            )
-        ),
-        "allocation_plan": slim_allocation_plan,
-        "devices": slim_devices,
-        "skipped_devices": result_payload.get("skipped_devices") or [],
-    }
+    slim_payload = _build_slim_result_payload(result_payload)
 
     # 회사 매핑 정보가 아직 없더라도 실행/결과는 항상 저장한다.
     try:

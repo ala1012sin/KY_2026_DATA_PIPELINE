@@ -5,7 +5,8 @@ FastAPI 기반 설비 데이터 예측/시뮬레이션 서버입니다.
 
 ## 구성 요약
 
-- `fastapi/`: 메인 애플리케이션
+- `fastapi/`: 추론/시뮬레이션/모니터링 메인 애플리케이션
+- `fastapi_train/`: 학습 서버 분리를 위한 시작 디렉터리
 - `postgres/`: PostgreSQL 초기화용 파일
 - `docs/`: 구조 설계 및 작업 문서
 - `docker-compose.yaml`: 앱 컨테이너 실행 설정
@@ -37,6 +38,7 @@ FastAPI 기반 설비 데이터 예측/시뮬레이션 서버입니다.
 - 루트(`/`) 접속 시 `simulate.html` 우선 제공
 
 현재 `docker-compose.yaml` 기준으로는 `app` 서비스만 실행되며, `fastapi/.env`를 환경변수 파일로 사용합니다.
+`fastapi_train/`은 학습 서버 분리를 위한 준비 디렉터리이며 아직 compose에 연결되지는 않았습니다.
 
 ## 공개 API 엔드포인트
 
@@ -78,6 +80,12 @@ FastAPI 기반 설비 데이터 예측/시뮬레이션 서버입니다.
 │   │   ├── current
 │   │   └── feature_model
 │   └── web
+├── fastapi_train
+│   ├── main.py
+│   ├── api
+│   ├── jobs
+│   ├── pipelines
+│   └── service
 └── postgres
     ├── Dockerfile
     └── init.sql

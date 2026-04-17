@@ -16,9 +16,7 @@ from scheduler.EW.scheduler import EWScheduler
 from setting.database_orm import db_connection_pool, engine
 from db.base import Base
 from db.public.models import TB_CUSTOMER, TB_DEVICE, TB_VIBRATION_LOG, TB_FLOW_LOG, TB_WARN_ERROR_LOG, TB_PEMSPROPLUS_LOG, TB_PEMS_PRO_LOG, TB_AI_PEMS_LOG
-from api.routers.predict_router import router as predict_router
 from api.routers.simulate_router import router as simulate_router
-from api.routers.model_router import router as model_router
 from api.routers.monitoring_router import router as monitoring_router
 from api.routers.optimize_router import router as optimize_router
 
@@ -49,9 +47,7 @@ WEB_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/web", StaticFiles(directory=str(WEB_DIR)), name="web")
 
 # 예측 라우터 추가
-app.include_router(predict_router, prefix="/api", tags=["predict"])
 app.include_router(simulate_router, prefix="/api", tags=["simulate"])
-app.include_router(model_router, prefix="/api", tags=["model"])
 app.include_router(monitoring_router, prefix="/api", tags=["monitoring"])
 app.include_router(optimize_router, prefix="/api", tags=["optimize"])
 
