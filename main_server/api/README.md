@@ -143,7 +143,51 @@ curl -X POST "http://localhost:8000/api/optimize/peak-dispatch" \
   }'
 ```
 
-## 4) 빠른 점검 순서
+## 4) 외부 적재 API
+
+### POST `/api/ingest/pems-pro`
+
+- 목적: 원격 데스크탑/윈도우 작업 스케줄러 등 외부 프로세스가 전송한 PEMS 로그를 수신해 `TB_PEMS_PRO_LOG`에 적재
+- Request Body
+  - JSON 배열
+  - 필수: `DEVICE_ID`, `LOG_DT`
+  - 권장: `PRESSURE`, `TEMPERATURE`, `HZ`, `OP_STATUS`, `AVGVOLTAGE`, `AVGCURRENT`, `CURVOLTAGE`, `FACTOR`, `OP_TIME`, `CSUSAGETIME`, `MGREFILLTIME`
+  - 선택: `SERIAL_NO`, `DEVICE_TYPE`, `DEVICE_NUM`, `CUSTOMER_ID`, `DEVICE_NAME`
+- 동작
+  - `DEVICE_ID`가 `TB_DEVICE`에 없으면 placeholder 장비를 자동 생성
+  - 같은 `DEVICE_ID + LOG_DT`가 이미 있으면 중복으로 보고 스킵
+- Response 요약
+  - `total`, `inserted`, `skipped_duplicates`, `created_devices`, `failed`, `errors`
+
+예시:
+
+```bash
+curl -X POST "http://localhost:8000/api/ingest/pems-pro" \
+  -H "Content-Type: application/json" \
+  -d '[
+    {
+      "DEVICE_ID": "dc291c30-2a18-4199-a33c-3020a57ee4bb",
+      "LOG_DT": "2026-04-21T10:00:00",
+      "PRESSURE": 5.1,
+      "TEMPERATURE": 32.4,
+      "HZ": 29.8,
+      "OP_STATUS": true,
+      "AVGVOLTAGE": 381.2,
+      "AVGCURRENT": 12.8,
+      "CURVOLTAGE": 384100,
+      "FACTOR": 0.94,
+      "OP_TIME": 1180,
+      "CSUSAGETIME": 220,
+      "MGREFILLTIME": 80,
+      "SERIAL_NO": "2412310908",
+      "DEVICE_TYPE": "2",
+      "DEVICE_NUM": "1",
+      "DEVICE_NAME": "PEMS PRO 1"
+    }
+  ]'
+```
+
+## 5) 빠른 점검 순서
 
 1. `GET /api/simulate/devices`로 장비 목록 확인
 2. `GET /api/simulate/template/{device_id}`로 기준값 로드
@@ -151,7 +195,7 @@ curl -X POST "http://localhost:8000/api/optimize/peak-dispatch" \
 4. `GET /api/monitor/dashboard/{device_id}`로 대시보드 응답 확인
 5. `POST /api/optimize/peak-dispatch`로 피크 분산 최적화 실행
 
-## 5) 웹 경로
+## 6) 웹 경로
 
 - 시뮬레이션: `/simulate`
 - MILP 대시보드: `/milp`

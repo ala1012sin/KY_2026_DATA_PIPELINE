@@ -16,6 +16,7 @@ from scheduler.EW.scheduler import EWScheduler
 from setting.database_orm import db_connection_pool, engine
 from db.base import Base
 from db.public.models import TB_CUSTOMER, TB_DEVICE, TB_VIBRATION_LOG, TB_FLOW_LOG, TB_WARN_ERROR_LOG, TB_PEMSPROPLUS_LOG, TB_PEMS_PRO_LOG, TB_AI_PEMS_LOG
+from api.routers.ingest_router import router as ingest_router
 from api.routers.simulate_router import router as simulate_router
 from api.routers.monitoring_router import router as monitoring_router
 from api.routers.optimize_router import router as optimize_router
@@ -50,6 +51,7 @@ app.mount("/web", StaticFiles(directory=str(WEB_DIR)), name="web")
 app.include_router(simulate_router, prefix="/api", tags=["simulate"])
 app.include_router(monitoring_router, prefix="/api", tags=["monitoring"])
 app.include_router(optimize_router, prefix="/api", tags=["optimize"])
+app.include_router(ingest_router, prefix="/api", tags=["ingest"])
 
 
 @app.get("/", include_in_schema=False)
@@ -123,10 +125,10 @@ async def _run_sensor_job(minutes: int = 1) -> None:
 
 
 
-#@scheduler.scheduled_job("interval", seconds=60)
-#async def sensor_cron_job():
-#    # 60초마다 최근 1분 데이터 처리
-#    await _run_sensor_job(minutes=1)
+@scheduler.scheduled_job("interval", seconds=60)
+async def sensor_cron_job():
+    # 60초마다 최근 1분 데이터 처리
+    await _run_sensor_job(minutes=1)
 
 # 아직 에러 데이터 수신이 되지 않아 주석 처리
 #@scheduler.scheduled_job("interval", minutes=1) 
