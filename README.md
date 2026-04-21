@@ -5,8 +5,8 @@ FastAPI 기반 설비 데이터 예측/시뮬레이션 서버입니다.
 
 ## 구성 요약
 
-- `fastapi/`: 추론/시뮬레이션/모니터링 메인 애플리케이션
-- `fastapi_train/`: 학습 서버 분리를 위한 시작 디렉터리
+- `main_server/`: 추론/시뮬레이션/모니터링 메인 애플리케이션
+- `model_train_server/`: 학습 서버 분리를 위한 시작 디렉터리
 - `postgres/`: PostgreSQL 초기화용 파일
 - `docs/`: 구조 설계 및 작업 문서
 - `docker-compose.yaml`: 앱 컨테이너 실행 설정
@@ -26,7 +26,7 @@ FastAPI 기반 설비 데이터 예측/시뮬레이션 서버입니다.
 
 ## 실행 구조
 
-애플리케이션은 [fastapi/main.py](/home/dongjae1012/KY-2026-main/fastapi/main.py:1)에서 시작됩니다.
+애플리케이션은 [main_server/main.py](/home/dongjae1012/KY-2026-main/main_server/main.py:1)에서 시작됩니다.
 
 - FastAPI 앱 생성
 - SQLAlchemy 메타데이터 기준 테이블 생성
@@ -37,8 +37,8 @@ FastAPI 기반 설비 데이터 예측/시뮬레이션 서버입니다.
 - `/web` 정적 파일 마운트
 - 루트(`/`) 접속 시 `simulate.html` 우선 제공
 
-현재 `docker-compose.yaml` 기준으로는 `app` 서비스만 실행되며, `fastapi/.env`를 환경변수 파일로 사용합니다.
-`fastapi_train/`은 학습 서버 분리를 위한 준비 디렉터리이며 아직 compose에 연결되지는 않았습니다.
+현재 `docker-compose.yaml` 기준으로는 `app`과 `train_app` 서비스를 실행할 수 있으며, `main_server/.env`를 환경변수 파일로 사용합니다.
+`model_train_server/`은 학습 서버 분리를 위한 디렉터리입니다.
 
 ## 공개 API 엔드포인트
 
@@ -57,7 +57,7 @@ FastAPI 기반 설비 데이터 예측/시뮬레이션 서버입니다.
 
 - `POST /api/optimize/peak-dispatch`
 
-상세 요청/응답 예시는 [fastapi/api/README.md](/home/dongjae1012/KY-2026-main/fastapi/api/README.md:1)를 참고하면 됩니다.
+상세 요청/응답 예시는 [main_server/api/README.md](/home/dongjae1012/KY-2026-main/main_server/api/README.md:1)를 참고하면 됩니다.
 
 ## 주요 디렉터리
 
@@ -65,7 +65,7 @@ FastAPI 기반 설비 데이터 예측/시뮬레이션 서버입니다.
 .
 ├── docker-compose.yaml
 ├── docs
-├── fastapi
+├── main_server
 │   ├── main.py
 │   ├── requirements.txt
 │   ├── .env
@@ -80,7 +80,7 @@ FastAPI 기반 설비 데이터 예측/시뮬레이션 서버입니다.
 │   │   ├── current
 │   │   └── feature_model
 │   └── web
-├── fastapi_train
+├── model_train_server
 │   ├── main.py
 │   ├── api
 │   ├── jobs
@@ -93,10 +93,10 @@ FastAPI 기반 설비 데이터 예측/시뮬레이션 서버입니다.
 
 ## 모델 디렉터리
 
-- `fastapi/ai_models/current`
+- `main_server/ai_models/current`
   - 전력 예측용 현재 모델
   - `classification`, `regression`, `cluster_meta.json`, `device_thresholds.json` 포함
-- `fastapi/ai_models/feature_model`
+- `main_server/ai_models/feature_model`
   - 센서 피처 예측용 모델
 
 ## 주요 패키지
@@ -133,7 +133,7 @@ docker compose up --build
 ### 로컬 실행
 
 ```bash
-cd fastapi
+cd main_server
 python -m pip install -r requirements.txt
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```

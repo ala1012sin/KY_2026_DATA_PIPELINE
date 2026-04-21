@@ -11,22 +11,22 @@ __pycache__/
 *.pyc
 
 # generated preprocessing outputs
-fastapi/out_preprocess/
+main_server/out_preprocess/
 
 # model artifacts / heavy outputs
-fastapi/backup/
+main_server/backup/
 *.dump
 
 # ai_models: keep only current and feature_model in git
-fastapi/ai_models/**
-!fastapi/ai_models/
-!fastapi/ai_models/current/
-!fastapi/ai_models/current/**
-!fastapi/ai_models/feature_model/
-!fastapi/ai_models/feature_model/**
+main_server/ai_models/**
+!main_server/ai_models/
+!main_server/ai_models/current/
+!main_server/ai_models/current/**
+!main_server/ai_models/feature_model/
+!main_server/ai_models/feature_model/**
 
 # debug 파일 commit 방지
-fastapi/api_debug
+main_server/api_debug
 .codex
 
 *:Zone.Identifier

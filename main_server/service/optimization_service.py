@@ -295,6 +295,27 @@ def _load_device_company_map(device_ids: List[str]) -> Dict[str, Dict[str, Any]]
             pass
 
 
+def _load_device_ids_by_customer(customer_id: str) -> List[str]:
+    """선택된 회사에 속한 전체 장비 ID를 조회한다."""
+    if not customer_id:
+        return []
+
+    db_gen = db_connection_pool()
+    db = next(db_gen)
+    try:
+        rows = (
+            db.query(TB_DEVICE.device_id)
+            .filter(TB_DEVICE.customer_id == uuid.UUID(customer_id))
+            .all()
+        )
+        return sorted(str(device_id) for (device_id,) in rows if device_id is not None)
+    finally:
+        try:
+            next(db_gen)
+        except StopIteration:
+            pass
+
+
 # ---------------------------------------------------------------------------
 # 장비별 권고 문구 생성
 # ---------------------------------------------------------------------------
@@ -1202,11 +1223,15 @@ def optimize_peak_dispatch_test(
     _validate_optimization_inputs(lookback_hours, idle_op_status_threshold)
     selected_customer_id = _normalize_customer_id(customer_id)
 
-    device_ids = list_model_device_ids(MODEL_ROOT)
-    if not device_ids:
-        raise ValueError("모델 장비가 없습니다")
+    if selected_customer_id:
+        device_ids = _load_device_ids_by_customer(selected_customer_id)
+        if not device_ids:
+            raise ValueError(f"입력한 CUSTOMER_ID에 해당하는 장비를 찾을 수 없습니다: {selected_customer_id}")
+    else:
+        device_ids = list_model_device_ids(MODEL_ROOT)
+        if not device_ids:
+            raise ValueError("모델 장비가 없습니다")
 
-    device_ids = _filter_device_ids_by_customer(device_ids, selected_customer_id)
     anchor_dt = _floor_time(datetime.now(), _MILP_TIME_BUCKET_MINUTES)
     records, skipped, _, op_mean_map = _collect_prediction_records(
         device_ids=device_ids,

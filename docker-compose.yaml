@@ -1,13 +1,27 @@
 services:
   app:
-    build: ./fastapi
+    build: ./main_server
     env_file:
-       - ./fastapi/.env
-    container_name: my-fastapi-server
+       - ./main_server/.env
+    container_name: my-main-server
     ports:
       - "8000:8000"
     volumes:
-      - ./fastapi:/app
+      - ./main_server:/app
+    environment:
+      TZ: Asia/Seoul
+
+  train_app:
+    build:
+      context: .
+      dockerfile: ./model_train_server/Dockerfile
+    env_file:
+      - ./main_server/.env
+    container_name: model_train_server
+    ports:
+      - "8001:8001"
+    volumes:
+      - .:/workspace
     environment:
       TZ: Asia/Seoul
 

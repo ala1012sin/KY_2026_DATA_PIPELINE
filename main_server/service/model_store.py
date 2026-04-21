@@ -64,6 +64,13 @@ def _resolve_model_root() -> str:
     return str(Path("./ai_models/current").resolve())
 
 
+def _match_input_format(estimator: Any, feature_frame: pd.DataFrame) -> Any:
+    """학습 시 사용한 입력 형식에 맞춰 DataFrame 또는 ndarray를 반환한다."""
+    if estimator is not None and hasattr(estimator, "feature_names_in_"):
+        return feature_frame
+    return feature_frame.to_numpy(dtype=np.float32)
+
+
 class LSTMClassifier(nn.Module):
     def __init__(self, input_size: int, hidden_size: int = 64, num_layers: int = 2, num_classes: int = 2, dropout: float = 0.2):
         """클러스터 분류용 LSTM 분류기 레이어를 초기화한다."""
@@ -379,6 +386,7 @@ class TwoStagePredictionRunner:
         self.device_id = str(device_id)
         self.classification_dir = os.path.join(self.model_root, "classification", self.device_id)
         self.regression_root = os.path.join(self.model_root, "regression", self.device_id)
+        self._regression_cache: Dict[Tuple[int, int], Dict[str, Any]] = {}
 
         if not os.path.isdir(self.regression_root):
             raise FileNotFoundError(f"regression model not found: {self.regression_root}")
@@ -424,7 +432,6 @@ class TwoStagePredictionRunner:
         self.last_missing_features: List[str] = []
         self.last_missing_count = 0
         self.required_raw_columns = ["DEVICE_ID", "LOG_DT"] + list(AGG_RULES.keys())
-        self._regression_cache: Dict[Tuple[int, int], Dict[str, Any]] = {}
 
     def _normalize_raw(self, raw_df: pd.DataFrame, device_id: Optional[str] = None) -> pd.DataFrame:
         """원본 로그 컬럼명을 표준화하고 기본 타입을 정리한다."""
@@ -601,21 +608,27 @@ class TwoStagePredictionRunner:
             return np.full(len(df_dev), self.available_clusters[0], dtype=int)
 
         feature_cols = self.feature_cols
-        X = df_dev.reindex(columns=feature_cols).fillna(0).to_numpy(dtype=np.float32)
+        feature_frame = df_dev.reindex(columns=feature_cols).fillna(0).astype(np.float32)
         best_name = str(self.cls_meta.get("best_model", "")).upper()
 
         if best_name == "MLP" and self.cls_scaler is not None:
-            return np.asarray(self.cls_model.predict(self.cls_scaler.transform(X)), dtype=int)
+            scaled_input = self.cls_scaler.transform(_match_input_format(self.cls_scaler, feature_frame))
+            return np.asarray(self.cls_model.predict(scaled_input), dtype=int)
 
         if best_name == "LSTM":
             lookback = int(self.cls_meta.get("lookback") or LOOKBACK)
-            X_scaled = self.cls_scaler.transform(X) if self.cls_scaler is not None else X
+            base_input = _match_input_format(self.cls_scaler, feature_frame) if self.cls_scaler is not None else feature_frame
+            X_scaled = (
+                self.cls_scaler.transform(base_input)
+                if self.cls_scaler is not None
+                else feature_frame.to_numpy(dtype=np.float32)
+            )
             Xs = _make_sequences(X_scaled, lookback)
             if len(Xs) == 0:
                 return np.zeros(len(df_dev), dtype=int)
 
             blob = self.cls_model
-            input_size = int(blob.get("input_size", X.shape[1])) if isinstance(blob, dict) else X.shape[1]
+            input_size = int(blob.get("input_size", feature_frame.shape[1])) if isinstance(blob, dict) else feature_frame.shape[1]
             num_classes = int(self.cls_meta.get("optimal_k", 2))
             state_dict = blob.get("state_dict") if isinstance(blob, dict) else (
                 blob.state_dict() if hasattr(blob, "state_dict") else blob
@@ -631,7 +644,8 @@ class TwoStagePredictionRunner:
             labels[lookback:] = preds_seq
             return labels
 
-        return np.asarray(self.cls_model.predict(X), dtype=int)
+        predict_input = _match_input_format(self.cls_model, feature_frame)
+        return np.asarray(self.cls_model.predict(predict_input), dtype=int)
 
     def _predict_voltage_for_cluster(self, cluster_k: int, seg: pd.DataFrame, horizon_min: int = 15) -> np.ndarray:
         """특정 클러스터 구간에 대해 horizon별 전력 예측값을 계산한다."""
@@ -641,7 +655,7 @@ class TwoStagePredictionRunner:
             return np.full(len(seg), np.nan, dtype=np.float32)
 
         feature_cols = bundle["feature_cols"]
-        X = seg.reindex(columns=feature_cols).fillna(0).to_numpy(dtype=np.float32)
+        feature_frame = seg.reindex(columns=feature_cols).fillna(0).astype(np.float32)
         best_name = str(bundle["meta"].get("best_model", "")).upper()
         model = bundle["model"]
         feat_scaler = bundle["feat_scaler"]
@@ -649,13 +663,18 @@ class TwoStagePredictionRunner:
 
         if best_name == "LSTM":
             lookback = int(bundle["meta"].get("lookback") or LOOKBACK)
-            X_scaled = feat_scaler.transform(X).astype(np.float32) if feat_scaler is not None else X
+            base_input = _match_input_format(feat_scaler, feature_frame) if feat_scaler is not None else feature_frame
+            X_scaled = (
+                feat_scaler.transform(base_input).astype(np.float32)
+                if feat_scaler is not None
+                else feature_frame.to_numpy(dtype=np.float32)
+            )
             Xs = _make_sequences(X_scaled, lookback)
             if len(Xs) == 0:
                 return np.full(len(seg), np.nan, dtype=np.float32)
 
             blob = model
-            input_size = int(blob.get("input_size", X.shape[1])) if isinstance(blob, dict) else X.shape[1]
+            input_size = int(blob.get("input_size", feature_frame.shape[1])) if isinstance(blob, dict) else feature_frame.shape[1]
             state_dict = blob.get("state_dict") if isinstance(blob, dict) else (
                 blob.state_dict() if hasattr(blob, "state_dict") else blob
             )
@@ -673,10 +692,16 @@ class TwoStagePredictionRunner:
             y_pred_s = np.full(len(seg), preds_seq[0], dtype=np.float32)
             y_pred_s[lookback:] = preds_seq
         elif best_name == "MLP":
-            X_scaled = feat_scaler.transform(X) if feat_scaler is not None else X
+            base_input = _match_input_format(feat_scaler, feature_frame) if feat_scaler is not None else feature_frame
+            X_scaled = (
+                feat_scaler.transform(base_input)
+                if feat_scaler is not None
+                else feature_frame.to_numpy(dtype=np.float32)
+            )
             y_pred_s = model.predict(X_scaled)
         else:
-            y_pred_s = model.predict(X)
+            predict_input = _match_input_format(model, feature_frame)
+            y_pred_s = model.predict(predict_input)
 
         y_pred = target_scaler.inverse_transform(np.asarray(y_pred_s).reshape(-1, 1)).flatten()
         return np.clip(y_pred, 0, None)
