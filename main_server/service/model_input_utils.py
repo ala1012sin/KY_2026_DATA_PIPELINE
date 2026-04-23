@@ -68,18 +68,31 @@ def resolve_editable_raw_fields(feature_cols: List[str], raw_columns: List[str])
 
 
 def list_model_device_ids(model_root: str) -> List[str]:
-    """current 분류 모델 폴더 기준으로 장비 목록을 반환한다."""
-    cls_root = Path(model_root) / "classification"
-    if not cls_root.is_dir():
-        return []
+    """current 모델 폴더 기준으로 장비 목록을 반환한다.
 
-    return sorted(
-        {
+    시뮬레이션 대상은 classification/regression 어느 한쪽에만 있어도
+    선택 가능해야 하므로 두 루트의 장비 폴더를 합집합으로 반환한다.
+    """
+    cls_root = Path(model_root) / "classification"
+    reg_root = Path(model_root) / "regression"
+
+    device_ids = set()
+
+    if cls_root.is_dir():
+        device_ids.update(
             path.name.strip()
             for path in cls_root.iterdir()
             if path.is_dir() and path.name.strip()
-        }
-    )
+        )
+
+    if reg_root.is_dir():
+        device_ids.update(
+            path.name.strip()
+            for path in reg_root.iterdir()
+            if path.is_dir() and path.name.strip()
+        )
+
+    return sorted(device_ids)
 
 
 def add_current_model_aliases(raw: pd.DataFrame) -> pd.DataFrame:

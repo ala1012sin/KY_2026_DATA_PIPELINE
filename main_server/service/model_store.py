@@ -409,7 +409,7 @@ class TwoStagePredictionRunner:
             scaler_path = os.path.join(self.classification_dir, "scaler.joblib")
             self.cls_scaler = joblib.load(scaler_path) if os.path.exists(scaler_path) else None
             self.cls_model = joblib.load(os.path.join(self.classification_dir, "model.pkl"))
-            self.best_model = f"two-stage:{self.cls_meta.get('best_model', 'classifier')}+cluster-regression"
+            self.best_model = f"{self.cls_meta.get('best_model', 'classifier')}+cluster"
             self.model_type = "TWO_STAGE"
         else:
             if len(self.available_clusters) != 1:
@@ -425,7 +425,7 @@ class TwoStagePredictionRunner:
             self.feature_cols = reg_bundle["feature_cols"]
             self.cls_scaler = None
             self.cls_model = None
-            self.best_model = f"single-cluster-regression:{reg_bundle['meta'].get('best_model', 'regressor')}"
+            self.best_model = f"{reg_bundle['meta'].get('best_model', 'regressor')}+cluster"
             self.model_type = "SINGLE_CLUSTER"
 
         self.dl_seq_len = LOOKBACK
@@ -771,8 +771,6 @@ class TwoStagePredictionRunner:
             "preds": [{
                 "y_15_pred": pred_15_value,
                 "y_30_pred": pred_30_value,
-                "cur_voltage_pred": pred_15_value,
-                "cluster_label": int(row["CLUSTER_LABEL"]),
             }],
         }
 
