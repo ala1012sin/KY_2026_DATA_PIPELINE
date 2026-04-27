@@ -6,7 +6,7 @@
 
 from typing import List, Optional, Union
 
-
+# EW 코드 비트값과 설명 매핑. 나중에 DB로 옮기는게 좋아 보입니다 실제 운영시에
 EW_CODE_MAP = {
     0x0000000000000001: "미확인 고장",
     0x0000000000000002: "비상 정지",
@@ -51,6 +51,12 @@ EW_CODE_MAP = {
 
 
 def parse_ew_code(code: Union[int, str, None]) -> Optional[int]:
+    """
+    args:
+        code: 정수 또는 16진수 문자열 형태의 EW 코드. None이나 빈 문자열, 0, 음수 등은 None으로 간주한다.
+    returns:
+        유효한 정수 코드 값. 0 또는 음수, 파싱 실패 시 None을 반환한다.
+    """
     if code is None:
         return None
 
@@ -73,6 +79,13 @@ def parse_ew_code(code: Union[int, str, None]) -> Optional[int]:
 
 
 def decode_ew_code(code: Union[int, str, None]) -> List[str]:
+    """
+    args:
+        code: 정수 또는 16진수 문자열 형태의 EW 코드. None이나 빈 문자열, 0, 음수 등은 None으로 간주한다.
+    returns:
+        코드에 매핑되는 설명 문자열 목록. 유효한 코드가 없으면 빈 리스트를 반환한다.
+    """
+    
     value = parse_ew_code(code)
     if value is None:
         return []
@@ -92,5 +105,13 @@ def decode_ew_code(code: Union[int, str, None]) -> List[str]:
 
 
 def decode_ew_code_text(code: Union[int, str, None], sep: str = ", ") -> str:
+    """
+    args:
+        code: 정수 또는 16진수 문자열 형태의 EW 코드. None이나 빈 문자열, 0, 음수 등은 None으로 간주한다.
+        sep: 여러 설명을 구분할 때 사용할 구분자 문자열. 기본값은 ", "입니다.
+    returns:
+        코드에 매핑되는 설명 문자열을 sep로 구분하여 반환한다. 유효한 코드가 없으면 빈 문자열을 반환한다.
+    """
+    
     labels = decode_ew_code(code)
     return sep.join(labels)

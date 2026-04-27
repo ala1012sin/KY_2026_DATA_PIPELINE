@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 from fastapi import HTTPException
 
+from service.model_constants import AGG_RULES, ROLL_WINDOWS
 from service.model_input_utils import add_current_model_aliases
 from service.processing.config import PreprocessConfig
 from service.processing.pipeline import (
@@ -23,34 +24,26 @@ _FEATURE_MODEL_ROOT = str(
     Path(os.environ.get("FEATURE_MODEL_ROOT", "./ai_models/feature_model")).expanduser().resolve()
 )
 
+# 예측 대상 피처 목록과 모델이 기대하는 피처별 라벨 매핑
 FEATURE_TARGETS = ["FACTOR", "TEMPERATURE", "PRESSURE", "AVGVOLTAGE", "AVGCURRENT", "HZ"]
-SELF_LAGS_FM = [1, 4, 12, 24, 48, 96]
-ROLL_WINS_FM = [4, 12, 48, 96]
+SELF_LAGS_FM = [1, 4, 12, 24, 48, 96] # 과거 데이터인 Lag를 몇 스텝 사용할지 정의하는 리스트
+ROLL_WINS_FM = ROLL_WINDOWS # 과거 데이터의 이동 통계량을 계산할 때 사용할 윈도우 크기를 정의하는 리스트
 
-_FEATURE_TARGET_TO_LABEL = {target: target for target in FEATURE_TARGETS}
+# 현재 모델이 예측하는 피처 이름과 사용자에게 보여줄 라벨이 동일하므로 간단히 매핑. 필요시 수정 가능
+_FEATURE_TARGET_TO_LABEL = {target: target for target in FEATURE_TARGETS} 
 
-_FM_AGG_RULES = {
-    "CUR_VOLTAGE": "max",
-    "AVGVOLTAGE": "mean",
-    "AVGCURRENT": "mean",
-    "FACTOR": "mean",
-    "PRESSURE": "mean",
-    "TEMPERATURE": "mean",
-    "HZ": "mean",
-    "OP_TIME": "sum",
-    "OP_STATUS": "max",
-    "CS_USAGE": "sum",
-    "MG_REFILL": "sum",
-    "UR_VOLT": "mean",
-}
+# 각 피쳐들을 어떻게 집계할지 정의해놓은 매핑표
+_FM_AGG_RULES = AGG_RULES
 
 
 def _feature_model_exists() -> bool:
+    """feature_model 디렉터리가 존재하고 비어있지 않은지 확인한다."""
     root = Path(_FEATURE_MODEL_ROOT)
     return root.exists() and any(root.iterdir())
 
 
 def _preprocess_for_feature_model(df_raw: pd.DataFrame) -> pd.DataFrame:
+    """feature_model이 기대하는 형태로 원본 데이터를 전처리한다."""
     df = add_current_model_aliases(df_raw).copy()
     if df.empty:
         return df
@@ -110,6 +103,7 @@ def _preprocess_for_feature_model(df_raw: pd.DataFrame) -> pd.DataFrame:
 
 
 def _build_fm_features(df: pd.DataFrame, target: str) -> pd.DataFrame:
+    """feature_model이 기대하는 형태로 피처를 가공한다."""
     tmp = pd.DataFrame(index=df.index)
 
     for lag in SELF_LAGS_FM:
@@ -136,12 +130,14 @@ def _build_fm_features(df: pd.DataFrame, target: str) -> pd.DataFrame:
 
 
 def _clip_feature_value(label: str, value: float) -> float:
+    """모델 예측값을 피처별로 클리핑, FACTOR는 -1 ~ 1의 범위를 가짐, 나머지는 0 이상의 값으로""" 
     if label == "FACTOR":
         return max(-1.0, min(1.0, value))
     return max(0.0, value)
 
 
 def _resolve_feature_model_horizon_dir(target_dir: Path, horizon_min: int) -> Path:
+    """ horizon_min이 15 또는 30이면 해당 서브디렉토리를 우선적으로 반환하고, 그렇지 않으면 target_dir 자체를 반환한다."""
     horizon_dir = target_dir / f"{int(horizon_min)}min"
     if horizon_dir.exists():
         return horizon_dir
@@ -149,6 +145,7 @@ def _resolve_feature_model_horizon_dir(target_dir: Path, horizon_min: int) -> Pa
 
 
 def _load_feature_model_horizon_prediction(target_dir: Path, df: pd.DataFrame, target: str, horizon_min: int) -> float | None:
+    """target_dir에서 horizon_min에 해당하는 모델을 찾아 예측값을 반환한다. 모델이나 예측값이 없으면 None을 반환한다."""
     model_dir = _resolve_feature_model_horizon_dir(target_dir, horizon_min)
 
     feat_cols_path = model_dir / "feature_cols.json"
@@ -170,6 +167,7 @@ def _load_feature_model_horizon_prediction(target_dir: Path, df: pd.DataFrame, t
 
 
 def _predict_features_with_feature_model(device_id: str, lookback_hours: int) -> Dict[str, Any]:
+    """장비 한 대에 대해 feature_model 기반 피처 예측을 수행한다."""
     end_dt = datetime.now()
     start_dt = end_dt - timedelta(hours=lookback_hours)
 

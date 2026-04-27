@@ -9,11 +9,12 @@ from api.schemas.ingest import PemsProIngestRow
 from db.public.models import TB_DEVICE, TB_PEMS_PRO_LOG
 from infrastructure.queryFactory.base_orm import BaseQueryFactory
 
-
+# PEMS Pro에서 받아오는 데이터는 device_id, log_dt 조합으로 유니크하다고 가정하고, 중복 레코드는 적재하지 않도록 한다.
 DEFAULT_PEMS_PRO_DEVICE_TYPE = "2"
 
 
 def _normalize_device_data(row: PemsProIngestRow) -> Dict[str, Any]:
+    """TB_DEVICE에 적재하기 전에 PemsProIngestRow에서 필요한 필드를 추출하고 정규화한다."""
     return {
         "device_id": row.device_id,
         "customer_id": row.customer_id,
@@ -25,6 +26,7 @@ def _normalize_device_data(row: PemsProIngestRow) -> Dict[str, Any]:
 
 
 def _get_or_create_device(db: Session, row: PemsProIngestRow) -> Tuple[TB_DEVICE, bool]:
+    """DB에서 device_id로 장비를 조회하고, 없으면 새로 생성한다. 반환값은 (장비 객체, 생성 여부) 튜플이다."""
     device = db.query(TB_DEVICE).filter(TB_DEVICE.device_id == row.device_id).first()
     if device:
         return device, False
@@ -36,6 +38,7 @@ def _get_or_create_device(db: Session, row: PemsProIngestRow) -> Tuple[TB_DEVICE
 
 
 def ingest_pems_pro_rows(db: Session, rows: List[PemsProIngestRow]) -> Dict[str, Any]:
+    """PEMS Pro에서 받아온 데이터를 TB_PEMS_PRO_LOG에 적재한다."""
     inserted = 0
     skipped_duplicates = 0
     created_devices = 0

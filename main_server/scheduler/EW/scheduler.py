@@ -79,6 +79,7 @@ class EWScheduler:
     def _find_existing_log(
         self, device_id, ew_dt: datetime, code: str, error_warn: int
     ) -> Optional[TB_WARN_ERROR_LOG]:
+        """같은 device_id, ew_dt, code, error_warn 조합의 로그가 이미 있는지 조회"""
         try:
             return (
                 self.db.query(TB_WARN_ERROR_LOG)
@@ -102,6 +103,7 @@ class EWScheduler:
         error_warn: int,
         ew_note: Optional[str] = None,
     ) -> bool:
+        """EW 로그를 DB에 삽입한다. 이미 존재하는 로그가 있으면 삽입하지 않고 False를 반환한다."""
         existing = self._find_existing_log(device_id, ew_dt, code, error_warn)
         if existing:
             return False
