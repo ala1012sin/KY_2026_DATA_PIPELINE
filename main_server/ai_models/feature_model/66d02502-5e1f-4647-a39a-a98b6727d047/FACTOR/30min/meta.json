@@ -1,0 +1,17 @@
+{
+  "target": "FACTOR",
+  "horizon_min": 30,
+  "best_model": "RandomForest",
+  "cv_mape": 0.4781187921409658,
+  "test_mape": 0.6172472682395396,
+  "test_mae": 0.005943011047281521,
+  "n_train": 42152,
+  "n_test": 10539,
+  "warning": false,
+  "all_models": {
+    "LightGBM": 0.4891816736334834,
+    "XGBoost": 0.5363885868655132,
+    "Ridge": 0.529160405586386,
+    "RandomForest": 0.4781187921409658
+  }
+}
