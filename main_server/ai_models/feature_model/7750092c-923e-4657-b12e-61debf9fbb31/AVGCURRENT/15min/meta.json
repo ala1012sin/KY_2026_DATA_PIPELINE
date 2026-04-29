@@ -1,0 +1,17 @@
+{
+  "target": "AVGCURRENT",
+  "horizon_min": 15,
+  "best_model": "LightGBM",
+  "cv_mape": NaN,
+  "test_mape": NaN,
+  "test_mae": 0.0,
+  "n_train": 10331,
+  "n_test": 2583,
+  "warning": false,
+  "all_models": {
+    "LightGBM": NaN,
+    "XGBoost": NaN,
+    "Ridge": NaN,
+    "RandomForest": NaN
+  }
+}

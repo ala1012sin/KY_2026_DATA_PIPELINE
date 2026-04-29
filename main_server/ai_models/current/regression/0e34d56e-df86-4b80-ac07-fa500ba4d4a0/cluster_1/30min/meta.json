@@ -1,0 +1,17 @@
+{
+  "best_model": "RandomForest",
+  "cv_mape": 3.0822047426567147,
+  "test_mape": 2.373936048612074,
+  "test_mae": 582.6867138420531,
+  "n_train": 32108,
+  "n_test": 8028,
+  "warning": false,
+  "all_models": {
+    "LightGBM": 3.146494332185779,
+    "XGBoost": 3.475976898202107,
+    "Ridge": 3.0895513573404143,
+    "RandomForest": 3.0822047426567147,
+    "MLP": 3.4478336970836048
+  },
+  "horizon_min": 30
+}

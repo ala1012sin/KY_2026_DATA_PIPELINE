@@ -1,0 +1,25 @@
+{
+  "device_id": "a777a442-96b1-47dd-8385-8bb575b30b7d",
+  "optimal_k": 2,
+  "best_model": "RandomForest",
+  "cv_f1": 0.8038549259178213,
+  "cv_auc": NaN,
+  "all_models": {
+    "LightGBM": {
+      "cv_f1": 0.799350319233673,
+      "cv_auc": NaN
+    },
+    "XGBoost": {
+      "cv_f1": 0.8027069822239248,
+      "cv_auc": NaN
+    },
+    "RandomForest": {
+      "cv_f1": 0.8038549259178213,
+      "cv_auc": NaN
+    },
+    "MLP": {
+      "cv_f1": 0.8016809730074961,
+      "cv_auc": NaN
+    }
+  }
+}

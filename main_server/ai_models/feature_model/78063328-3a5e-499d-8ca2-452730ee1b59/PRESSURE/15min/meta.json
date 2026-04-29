@@ -1,0 +1,17 @@
+{
+  "target": "PRESSURE",
+  "horizon_min": 15,
+  "best_model": "XGBoost",
+  "cv_mape": 22.14248615497049,
+  "test_mape": 16.037176020113396,
+  "test_mae": 0.21593861746485116,
+  "n_train": 25249,
+  "n_test": 6313,
+  "warning": false,
+  "all_models": {
+    "LightGBM": 31.886809234961312,
+    "XGBoost": 22.14248615497049,
+    "Ridge": 41.5014063867189,
+    "RandomForest": 37.29737617069688
+  }
+}

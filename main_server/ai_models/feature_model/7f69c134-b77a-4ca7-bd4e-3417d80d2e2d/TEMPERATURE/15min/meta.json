@@ -1,0 +1,17 @@
+{
+  "target": "TEMPERATURE",
+  "horizon_min": 15,
+  "best_model": "Ridge",
+  "cv_mape": 6.52464598336104,
+  "test_mape": 4.6864174282405555,
+  "test_mae": 2.6031371241618437,
+  "n_train": 24070,
+  "n_test": 6018,
+  "warning": false,
+  "all_models": {
+    "LightGBM": 18.705413577582597,
+    "XGBoost": 30.539571734525538,
+    "Ridge": 6.52464598336104,
+    "RandomForest": 21.95068654470254
+  }
+}

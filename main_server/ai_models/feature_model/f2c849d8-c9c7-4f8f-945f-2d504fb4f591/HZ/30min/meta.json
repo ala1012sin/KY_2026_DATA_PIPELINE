@@ -1,0 +1,17 @@
+{
+  "target": "HZ",
+  "horizon_min": 30,
+  "best_model": "Ridge",
+  "cv_mape": 49.78984204877356,
+  "test_mape": 50.52249990344734,
+  "test_mae": 2.5237260099005794,
+  "n_train": 39112,
+  "n_test": 9778,
+  "warning": true,
+  "all_models": {
+    "LightGBM": 51.039585598246994,
+    "XGBoost": 63.65664352255815,
+    "Ridge": 49.78984204877356,
+    "RandomForest": 50.10376706825473
+  }
+}

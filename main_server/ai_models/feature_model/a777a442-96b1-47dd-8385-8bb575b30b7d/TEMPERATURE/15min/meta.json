@@ -1,0 +1,17 @@
+{
+  "target": "TEMPERATURE",
+  "horizon_min": 15,
+  "best_model": "RandomForest",
+  "cv_mape": 4.485248859628603,
+  "test_mape": 3.229288869715849,
+  "test_mae": 1.6499160321976682,
+  "n_train": 23300,
+  "n_test": 5825,
+  "warning": false,
+  "all_models": {
+    "LightGBM": 7.381028079534727,
+    "XGBoost": 8.65703824359887,
+    "Ridge": 5.110567722586746,
+    "RandomForest": 4.485248859628603
+  }
+}

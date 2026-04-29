@@ -1,0 +1,17 @@
+{
+  "target": "FACTOR",
+  "horizon_min": 15,
+  "best_model": "Ridge",
+  "cv_mape": 11.213953518245976,
+  "test_mape": 6.840463943135454,
+  "test_mae": 0.01972392970777681,
+  "n_train": 17866,
+  "n_test": 4467,
+  "warning": false,
+  "all_models": {
+    "LightGBM": 13.137250509276157,
+    "XGBoost": 12.459427439533581,
+    "Ridge": 11.213953518245976,
+    "RandomForest": 12.093592459639186
+  }
+}
