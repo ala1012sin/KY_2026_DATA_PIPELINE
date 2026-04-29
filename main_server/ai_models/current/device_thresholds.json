@@ -105,24 +105,199 @@
     "n_clean": 18119
   },
   "49e64dec-892e-41e4-803f-74dfee729d6b": {
-    "iqr_lower": 20054.25390625,
-    "iqr_upper": 151251.59765625,
-    "p90_threshold": 105073.8203125,
+    "iqr_lower": 13376.187355468748,
+    "iqr_upper": 100884.81563671876,
+    "p90_threshold": 70084.23814843751,
     "n_total": 61733,
-    "n_clean": 51711
+    "n_clean": 49274
   },
   "5a8a2de6-9a6f-4f7a-820a-8f9003d7c7a2": {
-    "iqr_lower": 26881.26171875,
-    "iqr_upper": 147953.35546875,
-    "p90_threshold": 107031.2859375,
+    "iqr_lower": 17929.801566406262,
+    "iqr_upper": 98684.88809765625,
+    "p90_threshold": 71389.86772031251,
     "n_total": 62497,
-    "n_clean": 53825
+    "n_clean": 51197
   },
   "66d02502-5e1f-4647-a39a-a98b6727d047": {
-    "iqr_lower": 61381.849609375,
-    "iqr_upper": 135643.865234375,
-    "p90_threshold": 110442.8875,
+    "iqr_lower": 40941.693689453125,
+    "iqr_upper": 90474.45811132813,
+    "p90_threshold": 73665.4059625,
     "n_total": 61529,
-    "n_clean": 52763
+    "n_clean": 50040
+  },
+  "01b3f92d-d8d8-4838-8399-20b940edaaf7": {
+    "iqr_lower": 0.0,
+    "iqr_upper": 44613.93182373047,
+    "p90_threshold": 21582.576953125,
+    "n_total": 12474,
+    "n_clean": 11489
+  },
+  "0e34d56e-df86-4b80-ac07-fa500ba4d4a0": {
+    "iqr_lower": 0.0,
+    "iqr_upper": 65933.1396484375,
+    "p90_threshold": 28801.38359375,
+    "n_total": 60347,
+    "n_clean": 55423
+  },
+  "15efbc9c-b9f3-4bf9-ae77-389da45064f1": {
+    "iqr_lower": 0.0,
+    "iqr_upper": 237403.369140625,
+    "p90_threshold": 108811.8421875,
+    "n_total": 12502,
+    "n_clean": 10983
+  },
+  "1cfd4065-447e-4315-8b60-7052e259dd93": {
+    "iqr_lower": 29734.4169921875,
+    "iqr_upper": 87852.2373046875,
+    "p90_threshold": 73281.2171875,
+    "n_total": 60345,
+    "n_clean": 55743
+  },
+  "34f178f5-fb06-416e-b2fa-5a825b0bf92b": {
+    "iqr_lower": 0.0,
+    "iqr_upper": 143565.0244140625,
+    "p90_threshold": 75806.2015625,
+    "n_total": 33198,
+    "n_clean": 22655
+  },
+  "4bf84d04-ddcb-46e2-a472-0b3da8a6f78f": {
+    "iqr_lower": 37729.779296875,
+    "iqr_upper": 42865.919921875,
+    "p90_threshold": 42865.919921875,
+    "n_total": 33192,
+    "n_clean": 27605
+  },
+  "60b399ba-9b42-488d-b37a-8a62209d8e57": {
+    "iqr_lower": 0.0,
+    "iqr_upper": 334.40144538879497,
+    "p90_threshold": 141.750061035156,
+    "n_total": 19759,
+    "n_clean": 18376
+  },
+  "7122951e-d8d0-4cfc-8f8f-124e689d26aa": {
+    "iqr_lower": 0.0,
+    "iqr_upper": 111410.0390625,
+    "p90_threshold": 55297.071875,
+    "n_total": 61734,
+    "n_clean": 55677
+  },
+  "7750092c-923e-4657-b12e-61debf9fbb31": {
+    "iqr_lower": 0.0,
+    "iqr_upper": 0.0,
+    "p90_threshold": 0.0,
+    "n_total": 16020,
+    "n_clean": 13605
+  },
+  "78063328-3a5e-499d-8ca2-452730ee1b59": {
+    "iqr_lower": 0.0,
+    "iqr_upper": 179423.88671875,
+    "p90_threshold": 107686.71875,
+    "n_total": 46375,
+    "n_clean": 32891
+  },
+  "7f69c134-b77a-4ca7-bd4e-3417d80d2e2d": {
+    "iqr_lower": 0.0,
+    "iqr_upper": 138972.3447265625,
+    "p90_threshold": 82282.7421875,
+    "n_total": 33192,
+    "n_clean": 30255
+  },
+  "80465885-81de-4cbc-a34d-6c9bc8a2d3f6": {
+    "iqr_lower": 0.0,
+    "iqr_upper": 156337.6708984375,
+    "p90_threshold": 89860.98437500001,
+    "n_total": 9410,
+    "n_clean": 8635
+  },
+  "8b8c6c9d-56ea-4f61-af08-bbf2454d1096": {
+    "iqr_lower": 0.0,
+    "iqr_upper": 32407.1533203125,
+    "p90_threshold": 26712.694140625,
+    "n_total": 12495,
+    "n_clean": 10877
+  },
+  "91aab463-7f69-4694-9bf4-5ded22800f4e": {
+    "iqr_lower": 0.0,
+    "iqr_upper": 151334.19921875,
+    "p90_threshold": 77096.29531249999,
+    "n_total": 46375,
+    "n_clean": 32983
+  },
+  "930d2ca1-c983-4443-bace-66bfe0f49870": {
+    "iqr_lower": 0.0,
+    "iqr_upper": 72098.53515625,
+    "p90_threshold": 36266.8015625,
+    "n_total": 12471,
+    "n_clean": 10945
+  },
+  "a4cc2c77-d127-453d-975e-c93dbc3e30df": {
+    "iqr_lower": 0.0,
+    "iqr_upper": 0.0,
+    "p90_threshold": 0.0,
+    "n_total": 33192,
+    "n_clean": 28528
+  },
+  "a777a442-96b1-47dd-8385-8bb575b30b7d": {
+    "iqr_lower": 0.0,
+    "iqr_upper": 77773.64501953125,
+    "p90_threshold": 33496.76171875,
+    "n_total": 33192,
+    "n_clean": 29691
+  },
+  "a90e3322-57e9-4f77-945f-913ec212f3c3": {
+    "iqr_lower": 0.0,
+    "iqr_upper": 59820.12939453125,
+    "p90_threshold": 40298.05546875,
+    "n_total": 12505,
+    "n_clean": 9955
+  },
+  "bec5df85-5377-4432-b06f-eef6a7d4335a": {
+    "iqr_lower": 0.0,
+    "iqr_upper": 26545.526123046875,
+    "p90_threshold": 26545.526123046875,
+    "n_total": 10748,
+    "n_clean": 9106
+  },
+  "cb1e88f5-d044-47a3-b27f-7be809c54065": {
+    "iqr_lower": 0.0,
+    "iqr_upper": 47945.95983886719,
+    "p90_threshold": 30158.177734375004,
+    "n_total": 33196,
+    "n_clean": 29579
+  },
+  "d07c2355-1ce6-45f4-bdec-39341f30a325": {
+    "iqr_lower": 0.0,
+    "iqr_upper": 14154.427490234375,
+    "p90_threshold": 8531.75029296875,
+    "n_total": 9879,
+    "n_clean": 9082
+  },
+  "e6cd3343-ed79-42ce-b86d-d292920ebe04": {
+    "iqr_lower": 0.0,
+    "iqr_upper": 27278.484497070312,
+    "p90_threshold": 19724.425781250004,
+    "n_total": 55217,
+    "n_clean": 44463
+  },
+  "f2c849d8-c9c7-4f8f-945f-2d504fb4f591": {
+    "iqr_lower": 0.0,
+    "iqr_upper": 293.8120651245125,
+    "p90_threshold": 293.8120651245125,
+    "n_total": 55791,
+    "n_clean": 49841
+  },
+  "f852526d-4652-482a-b632-9ab66405ef7b": {
+    "iqr_lower": 0.0,
+    "iqr_upper": 0.0,
+    "p90_threshold": 0.0,
+    "n_total": 15543,
+    "n_clean": 13063
+  },
+  "f918b585-a923-4277-9ee6-68e4fe1d776f": {
+    "iqr_lower": 0.0,
+    "iqr_upper": 69218.41186523438,
+    "p90_threshold": 28525.0662109375,
+    "n_total": 33193,
+    "n_clean": 29802
   }
 }

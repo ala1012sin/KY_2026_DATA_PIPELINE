@@ -2,16 +2,16 @@
   "target": "FACTOR",
   "horizon_min": 15,
   "best_model": "RandomForest",
-  "cv_mape": 0.49025803327766554,
-  "test_mape": 0.7286199692726985,
-  "test_mae": 0.0070008598266107286,
+  "cv_mape": 0.4948958533859023,
+  "test_mape": 0.7624200812667941,
+  "test_mae": 0.006789223266279196,
   "n_train": 41335,
   "n_test": 10334,
   "warning": false,
   "all_models": {
-    "LightGBM": 0.5031541905153752,
-    "XGBoost": 0.5312019971943069,
-    "Ridge": 0.6777708163705475,
-    "RandomForest": 0.49025803327766554
+    "LightGBM": 0.5011114227702669,
+    "XGBoost": 0.6591233834614061,
+    "Ridge": 1.2737366573807367,
+    "RandomForest": 0.4948958533859023
   }
 }

@@ -2,16 +2,16 @@
   "target": "PRESSURE",
   "horizon_min": 30,
   "best_model": "XGBoost",
-  "cv_mape": 1.1797896795708014,
-  "test_mape": 5.375127786707017,
-  "test_mae": 0.15960373316610507,
+  "cv_mape": 1.1623486570100694,
+  "test_mape": 5.341933771513071,
+  "test_mae": 0.15854113788627838,
   "n_train": 42996,
   "n_test": 10750,
   "warning": false,
   "all_models": {
-    "LightGBM": 1.6792211116733462,
-    "XGBoost": 1.1797896795708014,
-    "Ridge": 2.189985592972822,
-    "RandomForest": 2.286558461642293
+    "LightGBM": 1.7126571428868513,
+    "XGBoost": 1.1623486570100694,
+    "Ridge": 1.607946495010884,
+    "RandomForest": 2.2876209301814523
   }
 }

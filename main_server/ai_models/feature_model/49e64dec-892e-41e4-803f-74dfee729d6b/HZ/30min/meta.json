@@ -2,16 +2,16 @@
   "target": "HZ",
   "horizon_min": 30,
   "best_model": "Ridge",
-  "cv_mape": 2.4004236478151135,
-  "test_mape": 5.0803481151021295,
-  "test_mae": 0.903202175399668,
+  "cv_mape": 2.0077691794861154,
+  "test_mape": 5.170458083437695,
+  "test_mae": 0.9087960299527095,
   "n_train": 41308,
   "n_test": 10328,
   "warning": false,
   "all_models": {
-    "LightGBM": 9.614226643544725,
-    "XGBoost": 8.512447804613355,
-    "Ridge": 2.4004236478151135,
-    "RandomForest": 9.114965593031219
+    "LightGBM": 9.747356400042309,
+    "XGBoost": 8.638296342070316,
+    "Ridge": 2.0077691794861154,
+    "RandomForest": 9.10756274091592
   }
 }

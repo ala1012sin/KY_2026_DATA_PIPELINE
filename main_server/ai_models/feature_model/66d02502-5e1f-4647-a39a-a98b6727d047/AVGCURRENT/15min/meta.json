@@ -2,16 +2,16 @@
   "target": "AVGCURRENT",
   "horizon_min": 15,
   "best_model": "RandomForest",
-  "cv_mape": 2.6990604708261947,
-  "test_mape": 3.1234714735708717,
-  "test_mae": 2.634914855233714,
+  "cv_mape": 2.203247383002277,
+  "test_mape": 3.0762808768246326,
+  "test_mae": 2.5450340676329755,
   "n_train": 42178,
   "n_test": 10545,
   "warning": false,
   "all_models": {
-    "LightGBM": 3.336889362292878,
-    "XGBoost": 3.864473681620525,
-    "Ridge": 3.0289511614178606,
-    "RandomForest": 2.6990604708261947
+    "LightGBM": 2.6904672859218675,
+    "XGBoost": 3.312720857491198,
+    "Ridge": 3.780709620127373,
+    "RandomForest": 2.203247383002277
   }
 }
