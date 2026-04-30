@@ -41,7 +41,9 @@ curl "http://localhost:8000/api/simulate/devices"
   - `base_timestamp`
   - `base_log_id`
   - `editable_fields`
+  - `editable_fields.CURVOLTAGE`: `kW` 단위
   - `baseline`
+  - `baseline.preds[].y_15_pred`, `baseline.preds[].y_30_pred`: `kW` 단위
 
 예시:
 
@@ -63,6 +65,10 @@ curl "http://localhost:8000/api/simulate/template/{device_id}?lookback_hours=24"
   - `simulated`
   - `delta`
   - `input_influence`
+  - `baseline.preds[].y_15_pred`, `simulated.preds[].y_15_pred`: `kW` 단위
+  - `baseline.preds[].y_30_pred`, `simulated.preds[].y_30_pred`: `kW` 단위
+  - `delta.y_15_pred`, `delta.y_30_pred`: `kW` 단위
+  - `overrides.CURVOLTAGE`: `kW` 단위
 
 예시:
 
@@ -93,6 +99,8 @@ curl -X POST "http://localhost:8000/api/simulate/predict" \
   - `timestamp`
   - `daily_energy_wh`
   - `history_by_time`
+  - `history_by_time.*.CURVOLTAGE`: `kW` 단위
+  - `daily_energy_wh`: `kWh` 단위 (레거시 키명 유지)
 
 예시:
 
@@ -105,7 +113,7 @@ curl "http://localhost:8000/api/monitor/dashboard/{device_id}?lookback_hours=24"
 - 목적: 오늘 자정부터 현재까지의 누적 전력량 조회
 - Response 요약
   - `device_id`
-  - `daily_energy_wh`
+  - `daily_energy_wh`: `kWh` 단위 (레거시 키명 유지)
 
 예시:
 
@@ -126,9 +134,9 @@ curl "http://localhost:8000/api/monitor/daily-energy/{device_id}"
   - `status`, `success`, `message`
   - `device_count`
   - `donor_device_ids`, `idle_device_ids`
-  - `peak_15_reduction`, `peak_30_reduction`
-  - `allocation_plan`
-  - `devices`
+  - `peak_15_reduction`, `peak_30_reduction`: `kW` 단위
+  - `allocation_plan[].power_w`: `kW` 단위 (레거시 키명 유지)
+  - `devices[].baseline_15`, `devices[].baseline_30`, `devices[].threshold`, `devices[].shift_out_15`, `devices[].shift_out_30`: `kW` 단위
   - `skipped_devices`
 
 예시:
@@ -143,7 +151,91 @@ curl -X POST "http://localhost:8000/api/optimize/peak-dispatch" \
   }'
 ```
 
-## 4) 외부 적재 API
+## 4) 예측 API
+
+### POST `/api/predict`
+
+- 목적: 클라이언트가 전달한 raw feature row 기반 수동 예측
+- Request Body
+  - `device_id` (string)
+  - `rows` (array of object)
+- Response 요약
+  - `device_id`, `best_model`
+  - `preds[].y_15_pred`, `preds[].y_30_pred`: `kW` 단위
+  - `missing_feature_count`, `missing_features`, `warnings`
+
+예시:
+
+```bash
+curl -X POST "http://localhost:8000/api/predict" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "device_id": "YOUR_DEVICE_ID",
+    "rows": [
+      {
+        "CURVOLTAGE": 120.0,
+        "PRESSURE": 5.2,
+        "TEMPERATURE": 31.0,
+        "HZ": 29.7,
+        "OP_STATUS": 1
+      }
+    ]
+  }'
+```
+
+### GET `/api/predict/{device_id}`
+
+- 목적: 장비의 최신 raw 이력 조회 후 자동 예측
+- Query
+  - `lookback_hours` (int, optional, default=`24`)
+- Response 요약
+  - `device_id`, `best_model`
+  - `preds[].y_15_pred`, `preds[].y_30_pred`: `kW` 단위
+
+예시:
+
+```bash
+curl "http://localhost:8000/api/predict/{device_id}?lookback_hours=24"
+```
+
+### POST `/api/predict/batch`
+
+- 목적: 여러 장비를 한 번에 자동 예측
+- Request Body
+  - `device_ids` (array[string], max 50)
+  - `lookback_hours` (int, optional, default=`24`)
+- Response 요약
+  - `total`, `success`, `failed`
+  - `results[].preds[].y_15_pred`, `results[].preds[].y_30_pred`: `kW` 단위
+  - `errors[]`
+
+예시:
+
+```bash
+curl -X POST "http://localhost:8000/api/predict/batch" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "device_ids": ["DEVICE_A", "DEVICE_B"],
+    "lookback_hours": 24
+  }'
+```
+
+### GET `/api/predict/feature/{device_id}`
+
+- 목적: 피처 전용 모델 기반 15/30분 예측
+- Query
+  - `lookback_hours` (int, optional, default=`24`)
+- Response 요약
+  - `device_id`, `best_model`
+  - `preds.{feature}.y_15_pred`, `preds.{feature}.y_30_pred`
+
+예시:
+
+```bash
+curl "http://localhost:8000/api/predict/feature/{device_id}?lookback_hours=24"
+```
+
+## 5) 외부 적재 API
 
 ### POST `/api/ingest/pems-pro`
 
@@ -187,15 +279,16 @@ curl -X POST "http://localhost:8000/api/ingest/pems-pro" \
   ]'
 ```
 
-## 5) 빠른 점검 순서
+## 6) 빠른 점검 순서
 
 1. `GET /api/simulate/devices`로 장비 목록 확인
 2. `GET /api/simulate/template/{device_id}`로 기준값 로드
 3. `POST /api/simulate/predict`로 override 시뮬레이션 실행
 4. `GET /api/monitor/dashboard/{device_id}`로 대시보드 응답 확인
-5. `POST /api/optimize/peak-dispatch`로 피크 분산 최적화 실행
+5. `GET /api/predict/{device_id}`로 자동 예측 응답 확인
+6. `POST /api/optimize/peak-dispatch`로 피크 분산 최적화 실행
 
-## 6) 웹 경로
+## 7) 웹 경로
 
 - 시뮬레이션: `/simulate`
 - MILP 대시보드: `/milp`

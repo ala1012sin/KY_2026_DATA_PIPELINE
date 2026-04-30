@@ -11,19 +11,5 @@ services:
     environment:
       TZ: Asia/Seoul
 
-  train_app:
-    build:
-      context: .
-      dockerfile: ./model_train_server/Dockerfile
-    env_file:
-      - ./main_server/.env
-    container_name: model_train_server
-    ports:
-      - "8001:8001"
-    volumes:
-      - .:/workspace
-    environment:
-      TZ: Asia/Seoul
-
 volumes:
   ky_db_data_v3:

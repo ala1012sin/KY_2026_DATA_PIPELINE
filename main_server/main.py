@@ -20,6 +20,7 @@ from api.routers.ingest_router import router as ingest_router
 from api.routers.simulate_router import router as simulate_router
 from api.routers.monitoring_router import router as monitoring_router
 from api.routers.optimize_router import router as optimize_router
+from api.routers.predict_router import router as predict_router
 
 load_dotenv()
 
@@ -51,6 +52,7 @@ app.mount("/web", StaticFiles(directory=str(WEB_DIR)), name="web")
 app.include_router(simulate_router, prefix="/api", tags=["simulate"])
 app.include_router(monitoring_router, prefix="/api", tags=["monitoring"])
 app.include_router(optimize_router, prefix="/api", tags=["optimize"])
+app.include_router(predict_router, prefix="/api", tags=["predict"])
 app.include_router(ingest_router, prefix="/api", tags=["ingest"])
 
 
