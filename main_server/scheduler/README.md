@@ -1,34 +1,34 @@
-# Scheduler Guide
+# Scheduler 가이드
 
-This directory contains periodic job runners.
+주기적 배치 잡 실행기가 위치하는 디렉터리입니다.
 
-## Structure
+## 구조
 
 - `sensor/scheduler.py`
-  - Sensor batch job logic.
+  - 센서 데이터 배치 잡 로직
 - `EW/scheduler.py`
-  - EW batch job logic.
+  - 에러/경고 데이터 배치 잡 로직
 
-## Runtime Integration
+## 앱과의 연동
 
-- Scheduler instance is created in `main_server/main.py` using `AsyncIOScheduler`.
-- Job registration is currently commented out in `main_server/main.py`.
-- App startup (`lifespan`) starts the scheduler; app shutdown stops it.
+- `main_server/main.py`에서 `AsyncIOScheduler` 인스턴스를 생성합니다.
+- 앱 시작(`lifespan`) 시 스케줄러가 실행되고, 앱 종료 시 중지됩니다.
+- 현재 `main_server/main.py`에서 잡 등록 코드는 주석 처리된 상태입니다.
 
-## Current Behavior
+## 현재 동작 상태
 
-- Scheduler framework is active.
-- Periodic jobs are disabled by code comments.
-- This means no interval-triggered sensor/EW batch execution until jobs are re-enabled.
+- 스케줄러 프레임워크는 활성화되어 있습니다.
+- 주기 잡은 코드 주석 처리로 비활성화되어 있습니다.
+- 즉, 잡을 다시 활성화하기 전까지는 센서/EW 배치가 자동 실행되지 않습니다.
 
-## Re-enable Flow
+## 잡 재활성화 절차
 
-1. Restore `@scheduler.scheduled_job(...)` decorators in `main_server/main.py`.
-2. Validate DB connection lifecycle in each scheduled run.
-3. Monitor logs for execution interval and failure handling.
+1. `main_server/main.py`에서 `@scheduler.scheduled_job(...)` 데코레이터 주석을 해제합니다.
+2. 각 잡 실행 시 DB 세션 생명주기가 올바르게 처리되는지 확인합니다.
+3. 실행 간격과 예외 처리 로그를 모니터링합니다.
 
-## Editing Checklist
+## 수정 체크리스트
 
-- Keep job methods idempotent when possible.
-- Avoid long blocking logic in scheduled callbacks.
-- Ensure exceptions are logged and do not crash scheduler lifecycle.
+- 잡 메서드는 가능하면 멱등성을 유지합니다.
+- 스케줄된 콜백 내에 오래 걸리는 블로킹 로직을 넣지 않습니다.
+- 예외는 반드시 로깅하고, 스케줄러 생명주기를 중단시키지 않도록 처리합니다.

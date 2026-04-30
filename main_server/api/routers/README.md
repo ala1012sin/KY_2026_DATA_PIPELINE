@@ -1,8 +1,8 @@
-# Router Guide
+# Router 가이드
 
-This directory contains FastAPI router modules.
+FastAPI 라우터 모듈이 위치하는 디렉터리입니다.
 
-## Router Files
+## 라우터 파일 목록
 
 - `simulate_router.py`
   - `/simulate/devices`
@@ -21,31 +21,25 @@ This directory contains FastAPI router modules.
 - `ingest_router.py`
   - `/ingest/pems-pro`
 
-## Responsibilities
+## 라우터 책임
 
-- Validate request shape and query ranges.
-- Map exceptions to HTTP status codes.
-- Record API events when needed.
-- Delegate business logic to service layer.
+- 요청 구조 및 쿼리 파라미터 범위 검증
+- 예외를 HTTP 상태 코드로 매핑
+- 필요 시 API 이벤트 기록
+- 비즈니스 로직은 서비스 레이어에 위임
 
-## Unit Contract Notes
+## 단위 계약 메모
 
-- Several response fields now return values in kW/kWh.
-- Some legacy key names intentionally remain unchanged for compatibility.
-  - Example: `daily_energy_wh` key may carry kWh value.
-  - Example: `allocation_plan[].power_w` key may carry kW value.
+- 공개 응답의 전력 관련 필드는 kW/kWh 단위로 반환합니다.
+- 하위 호환을 위해 일부 레거시 키 이름은 의도적으로 유지합니다.
+  - 예: `daily_energy_wh` 키가 실제로는 kWh 값을 담습니다.
+  - 예: `allocation_plan[].power_w` 키가 실제로는 kW 값을 담습니다.
 
-## Router Review Summary
+## 수정 체크리스트
 
-- Router registration in `main_server/main.py` includes all router modules above.
-- No router code fix was required for path conflicts or runtime errors during this update.
-- Main update need was documentation alignment.
-
-## Editing Checklist
-
-- Keep endpoint path and method stable unless versioning is planned.
-- If response payload shape changes, update:
-  - `api/schemas`
+- 버전 관리 계획 없이 엔드포인트 경로나 HTTP 메서드를 바꾸지 않습니다.
+- 응답 페이로드 구조가 바뀌면 함께 업데이트할 항목:
+  - `api/schemas/`
   - `main_server/api/README.md`
-  - web pages using the endpoint
-- Keep router logic thin; put business rules in services.
+  - 해당 엔드포인트를 사용하는 웹 페이지
+- 라우터 로직은 얇게 유지하고, 비즈니스 규칙은 서비스에 넣습니다.

@@ -1,17 +1,17 @@
 # KY-2026 Main
 
-FastAPI-based server for prediction, simulation, monitoring, and peak dispatch optimization.
+FastAPI 기반 설비 데이터 예측/시뮬레이션/모니터링/피크 분산 최적화 서버입니다.
 
-## Project Layout
+## 프로젝트 구조
 
-- `main_server/`: Main application
-- `docker-compose.yaml`: Container run configuration
+- `main_server/`: 메인 애플리케이션
+- `docker-compose.yaml`: 컨테이너 실행 설정
 
-## App Entry And Routing
+## 앱 시작 및 라우터
 
-The application starts at `main_server/main.py`.
+애플리케이션은 `main_server/main.py`에서 시작됩니다.
 
-Current registered routers under `/api`:
+현재 `/api` 하위에 등록된 라우터:
 
 - `simulate`
 - `monitoring`
@@ -19,13 +19,13 @@ Current registered routers under `/api`:
 - `predict`
 - `ingest`
 
-Web pages:
+웹 페이지 경로:
 
 - `/simulate`
 - `/milp`
 - `/feature-dashboard`
 
-## Public API Groups
+## 공개 API 목록
 
 - Simulate
   - `GET /api/simulate/devices`
@@ -44,15 +44,15 @@ Web pages:
 - Ingest
   - `POST /api/ingest/pems-pro`
 
-Detailed request/response examples are in `main_server/api/README.md`.
+상세 요청/응답 예시는 `main_server/api/README.md`를 참고하세요.
 
-## Unit Conventions (Public Response)
+## 공개 응답 단위 규칙
 
-- Power-like response fields are exposed as `kW`.
-- Daily energy response value is exposed as `kWh`.
-- Some legacy key names remain unchanged for compatibility (for example, `daily_energy_wh`, `power_w`).
+- 전력 관련 응답 필드는 `kW` 단위로 반환합니다.
+- 일 누적 전력량 응답 값은 `kWh` 단위로 반환합니다.
+- 하위 호환을 위해 일부 레거시 키 이름은 유지합니다 (예: `daily_energy_wh`, `power_w`).
 
-## Run
+## 실행 방법
 
 ### Docker Compose
 
@@ -60,9 +60,9 @@ Detailed request/response examples are in `main_server/api/README.md`.
 docker compose up --build
 ```
 
-`docker-compose.yaml` currently runs only the `app` service.
+현재 `docker-compose.yaml`은 `app` 서비스만 실행합니다.
 
-### Local
+### 로컬 실행
 
 ```bash
 cd main_server
@@ -70,9 +70,9 @@ python -m pip install -r requirements.txt
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-## Important Paths
+## 주요 문서 경로
 
-- `main_server/api/README.md`: API usage guide
-- `main_server/api/routers/README.md`: Router overview
-- `main_server/service/README.md`: Service layer overview
-- `main_server/scheduler/README.md`: Scheduler overview
+- `main_server/api/README.md`: API 사용 가이드
+- `main_server/api/routers/README.md`: 라우터 개요
+- `main_server/service/README.md`: 서비스 레이어 개요
+- `main_server/scheduler/README.md`: 스케줄러 개요
