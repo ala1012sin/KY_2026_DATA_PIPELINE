@@ -1,17 +1,17 @@
 {
-  "best_model": "LightGBM",
-  "cv_mape": NaN,
-  "test_mape": NaN,
-  "test_mae": 0.0,
-  "n_train": 2101,
-  "n_test": 526,
+  "best_model": "XGBoost",
+  "cv_mape": 0.027490230582542647,
+  "test_mape": 0.0023625288911709817,
+  "test_mae": 0.6430996981534091,
+  "n_train": 2110,
+  "n_test": 528,
   "warning": false,
   "all_models": {
-    "LightGBM": NaN,
-    "XGBoost": NaN,
-    "Ridge": NaN,
-    "RandomForest": NaN,
-    "MLP": NaN
+    "LightGBM": 0.06421046763882868,
+    "XGBoost": 0.027490230582542647,
+    "Ridge": 3.9255557353631296,
+    "RandomForest": 0.0741781119214509,
+    "MLP": 0.12906638704360868
   },
   "horizon_min": 30
 }

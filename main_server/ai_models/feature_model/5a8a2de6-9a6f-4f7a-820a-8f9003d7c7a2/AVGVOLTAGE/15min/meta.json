@@ -1,17 +1,17 @@
 {
   "target": "AVGVOLTAGE",
   "horizon_min": 15,
-  "best_model": "RandomForest",
-  "cv_mape": 0.20655074726249448,
-  "test_mape": 0.2843631674565598,
-  "test_mae": 1.0481815845634639,
+  "best_model": "Ridge",
+  "cv_mape": 0.22439230081802197,
+  "test_mape": 0.22364927835298193,
+  "test_mae": 0.8683869273014656,
   "n_train": 43024,
   "n_test": 10757,
   "warning": false,
   "all_models": {
-    "LightGBM": 0.21691194563332003,
-    "XGBoost": 1.1432272647528845,
-    "Ridge": 0.8215947497486287,
-    "RandomForest": 0.20655074726249448
+    "LightGBM": 0.23004538392825385,
+    "XGBoost": 0.2527143520861494,
+    "Ridge": 0.22439230081802197,
+    "RandomForest": 0.2265346515180266
   }
 }

@@ -1,17 +1,17 @@
 {
-  "best_model": "Ridge",
-  "cv_mape": 96.7111929607985,
-  "test_mape": 85.70701799534292,
-  "test_mae": 86.06501064757676,
-  "n_train": 1955,
+  "best_model": "XGBoost",
+  "cv_mape": 0.23384281561310338,
+  "test_mape": 1.1793537745251506,
+  "test_mae": 236.51060039621677,
+  "n_train": 1956,
   "n_test": 489,
-  "warning": true,
+  "warning": false,
   "all_models": {
-    "LightGBM": 99.65372698196704,
-    "XGBoost": 100.0,
-    "Ridge": 96.7111929607985,
-    "RandomForest": 99.35227533500466,
-    "MLP": 98.0114180100757
+    "LightGBM": 0.25950370167579057,
+    "XGBoost": 0.23384281561310338,
+    "Ridge": 4.921907050213436,
+    "RandomForest": 0.9261068278567455,
+    "MLP": 0.532604352388524
   },
   "horizon_min": 30
 }

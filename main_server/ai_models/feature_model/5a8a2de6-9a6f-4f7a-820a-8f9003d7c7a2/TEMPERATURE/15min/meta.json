@@ -2,16 +2,16 @@
   "target": "TEMPERATURE",
   "horizon_min": 15,
   "best_model": "LightGBM",
-  "cv_mape": 0.9840845066887252,
-  "test_mape": 5.568024506594389,
-  "test_mae": 2.0060637909404133,
+  "cv_mape": 0.9874708290377475,
+  "test_mape": 5.480688264202008,
+  "test_mae": 1.9855716670662338,
   "n_train": 43024,
   "n_test": 10757,
   "warning": false,
   "all_models": {
-    "LightGBM": 0.9840845066887252,
-    "XGBoost": 2.588976987680243,
-    "Ridge": 1.2808399760432976,
-    "RandomForest": 1.3917477898070048
+    "LightGBM": 0.9874708290377475,
+    "XGBoost": 2.6949686899557155,
+    "Ridge": 2.235497727762097,
+    "RandomForest": 1.3451964239414445
   }
 }

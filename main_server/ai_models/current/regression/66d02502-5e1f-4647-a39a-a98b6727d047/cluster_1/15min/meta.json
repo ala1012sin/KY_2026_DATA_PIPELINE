@@ -1,17 +1,17 @@
 {
-  "best_model": "MLP",
-  "cv_mape": 1.7714271739625105,
-  "test_mape": 1.950247520172435,
-  "test_mae": 1159.4475026598827,
-  "n_train": 40032,
-  "n_test": 10008,
+  "best_model": "RandomForest",
+  "cv_mape": 0.7848327187915263,
+  "test_mape": 1.3191020973610235,
+  "test_mae": 1312.0306997507996,
+  "n_train": 30970,
+  "n_test": 7743,
   "warning": false,
   "all_models": {
-    "LightGBM": 2.6399931421476914,
-    "XGBoost": 2.9556855839821647,
-    "Ridge": 3.1726153245918582,
-    "RandomForest": 2.126825013885984,
-    "MLP": 1.7714271739625105
+    "LightGBM": 0.854446748377377,
+    "XGBoost": 0.9355851686658486,
+    "Ridge": 2.5745857824905007,
+    "RandomForest": 0.7848327187915263,
+    "MLP": 1.14632600327602
   },
   "horizon_min": 15
 }
