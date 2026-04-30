@@ -27,6 +27,70 @@ from service.processing.pipeline import (
 
 MODEL_ROOT = str(Path(os.environ.get("MODEL_ROOT", "./ai_models/current")).expanduser().resolve())
 store = ModelStore(MODEL_ROOT)
+POWER_RESPONSE_KEYS = ("y_15_pred", "y_30_pred")
+POWER_INPUT_FIELDS = {"CURVOLTAGE"}
+
+
+def _w_to_kw(value: Any) -> Optional[float]:
+    """W 단위 값을 kW 단위로 변환한다."""
+    if value is None:
+        return None
+    try:
+        return round(float(value) / 1000.0, 4)
+    except Exception:
+        return None
+
+
+def _convert_prediction_payload_to_kw(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """예측 응답 payload의 전력 예측값을 kW 단위로 변환한다."""
+    converted = dict(payload)
+    preds = []
+    for pred in payload.get("preds") or []:
+        if not isinstance(pred, dict):
+            preds.append(pred)
+            continue
+        pred_out = dict(pred)
+        for key in POWER_RESPONSE_KEYS:
+            if key in pred_out:
+                converted_value = _w_to_kw(pred_out.get(key))
+                pred_out[key] = pred_out.get(key) if converted_value is None else converted_value
+        preds.append(pred_out)
+    converted["preds"] = preds
+    return converted
+
+
+def _convert_power_fields_to_response_units(values: Dict[str, Any]) -> Dict[str, Any]:
+    """응답의 전력 관련 raw 필드만 kW 단위로 변환한다."""
+    converted: Dict[str, Any] = {}
+    for field, value in (values or {}).items():
+        if str(field).upper() in POWER_INPUT_FIELDS:
+            converted_value = _w_to_kw(value)
+            converted[field] = value if converted_value is None else converted_value
+        else:
+            converted[field] = value
+    return converted
+
+
+def _convert_power_fields_to_internal_units(values: Dict[str, float]) -> Dict[str, float]:
+    """외부 입력의 전력 관련 raw 필드를 내부 계산용 W 단위로 되돌린다."""
+    converted: Dict[str, float] = {}
+    for field, value in (values or {}).items():
+        numeric = float(value)
+        if str(field).upper() in POWER_INPUT_FIELDS:
+            converted[field] = numeric * 1000.0
+        else:
+            converted[field] = numeric
+    return converted
+
+
+def _convert_simulation_delta_to_kw(delta: Dict[str, Any]) -> Dict[str, Any]:
+    """시뮬레이션 delta 응답의 전력 차이를 kW 단위로 변환한다."""
+    converted = dict(delta or {})
+    for key in POWER_RESPONSE_KEYS:
+        if key in converted:
+            converted_value = _w_to_kw(converted.get(key))
+            converted[key] = converted.get(key) if converted_value is None else converted_value
+    return converted
 
 
 def _validate_lookback_hours(lookback_hours: int) -> None:
@@ -136,7 +200,12 @@ def predict_from_raw_history(
     }
 
 
-def predict_one_device(device_id: str, lookback_hours: int, max_data_age_hours: int) -> Dict[str, Any]:
+def predict_one_device(
+    device_id: str,
+    lookback_hours: int,
+    max_data_age_hours: int,
+    power_in_kw: bool = False,
+) -> Dict[str, Any]:
     # 자동 예측 공통 경로(조회→전처리→예측)
     _validate_lookback_hours(lookback_hours)
     _validate_max_data_age_hours(max_data_age_hours)
@@ -155,13 +224,16 @@ def predict_one_device(device_id: str, lookback_hours: int, max_data_age_hours: 
         raise HTTPException(status_code=404, detail=str(e)) from e
 
     raw = add_current_model_aliases(raw)
-    return predict_from_raw_history(
+    result = predict_from_raw_history(
         device_id=device_id,
         runner=runner,
         raw=raw,
         max_data_age_hours=max_data_age_hours,
         enforce_freshness=True,
     )
+    if power_in_kw:
+        return _convert_prediction_payload_to_kw(result)
+    return result
 
 
 def predict_from_preprocessed(
@@ -255,7 +327,7 @@ def clear_model_caches() -> None:
 # ---------------------------------------------------------------------------
 # 수동 예측 / 시뮬레이션 입력 생성
 # ---------------------------------------------------------------------------
-def predict_manual(device_id: str, rows: List[Dict[str, float]]) -> Dict[str, Any]:
+def predict_manual(device_id: str, rows: List[Dict[str, float]], power_in_kw: bool = False) -> Dict[str, Any]:
     # 수동 예측 공통 경로(raw row 직접 입력)
     runner = _get_runner(device_id)
 
@@ -281,7 +353,7 @@ def predict_manual(device_id: str, rows: List[Dict[str, float]]) -> Dict[str, An
         enforce_freshness=False,
     )
 
-    return {
+    result = {
         "device_id": device_id,
         "best_model": runner.best_model,
         "preds": result["preds"],
@@ -289,6 +361,9 @@ def predict_manual(device_id: str, rows: List[Dict[str, float]]) -> Dict[str, An
         "missing_features": runner.last_missing_features,
         "warnings": [],
     }
+    if power_in_kw:
+        return _convert_prediction_payload_to_kw(result)
+    return result
 
 
 def _load_simulation_raw(device_id: str, start_dt: datetime, end_dt: datetime) -> pd.DataFrame:
@@ -328,13 +403,18 @@ def build_simulation_template(device_id: str, lookback_hours: int = 24) -> Dict[
             continue
         values[field] = float(latest_value)
 
-    baseline = predict_one_device(device_id=device_id, lookback_hours=lookback_hours, max_data_age_hours=24)
+    baseline = predict_one_device(
+        device_id=device_id,
+        lookback_hours=lookback_hours,
+        max_data_age_hours=24,
+        power_in_kw=True,
+    )
 
     return {
         "device_id": device_id,
         "base_timestamp": pd.Timestamp(latest["LOG_DT"]).isoformat(),
         "base_log_id": (None if "LOG_ID" not in raw.columns else int(latest["LOG_ID"])),
-        "editable_fields": values,
+        "editable_fields": _convert_power_fields_to_response_units(values),
         "baseline": baseline,
     }
 
@@ -590,6 +670,7 @@ def run_simulation(
         base_log_id=base_log_id,
     )
     requested_overrides = _validate_simulation_overrides(overrides or {}, editable_fields)
+    requested_overrides = _convert_power_fields_to_internal_units(requested_overrides)
     effective_overrides = _collect_effective_overrides(raw, target_idx, requested_overrides)
     bin_mask = _build_simulation_bin_mask(raw, target_ts)
     if not bool(bin_mask.any()):
@@ -634,9 +715,9 @@ def run_simulation(
     return {
         "device_id": device_id,
         "base_timestamp": pd.Timestamp(target_ts).isoformat(),
-        "overrides": effective_overrides,
-        "baseline": baseline,
-        "simulated": simulated,
-        "delta": result_value["delta"],
+        "overrides": _convert_power_fields_to_response_units(effective_overrides),
+        "baseline": _convert_prediction_payload_to_kw(baseline),
+        "simulated": _convert_prediction_payload_to_kw(simulated),
+        "delta": _convert_simulation_delta_to_kw(result_value["delta"]),
         "input_influence": input_influence,
     }

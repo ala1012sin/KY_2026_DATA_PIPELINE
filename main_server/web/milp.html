@@ -68,7 +68,7 @@
         <button id="btnRun">MILP 실행</button>
       </div>
     </div>
-    <div class="muted" id="statusText">실행 전입니다.</div>
+    <div class="muted" id="statusText">실행 전입니다. 화면의 전력 값은 kW 기준으로 표시됩니다.</div>
   </div>
 
   <div class="card">
@@ -115,7 +115,8 @@
     }
 
     function toKw(v) {
-      return Number(v || 0) / 1000;
+      if (v === null || v === undefined || Number.isNaN(Number(v))) return null;
+      return Number(v);
     }
 
     function formatKw(v, digits = 2) {
@@ -168,9 +169,9 @@
       allDevices.forEach((device, idx) => {
         const axisSuffix = idx === 0 ? '' : String(idx + 1);
         const lineColor = colors[idx % colors.length];
-        const p15 = toKw(device.baseline_15 || 0);
-        const p30 = toKw(device.baseline_30 || 0);
-        const th = toKw(device.threshold || 0);
+        const p15 = toKw(device.baseline_15) || 0;
+        const p30 = toKw(device.baseline_30) || 0;
+        const th = toKw(device.threshold) || 0;
         const exceed15 = Math.max(0, p15 - th);
         const exceed30 = Math.max(0, p30 - th);
 
@@ -259,8 +260,8 @@
       const items = [
         { k: '분석 장비 수', v: `${data.device_count}대` },
         { k: '분배 기준 상위 장비', v: (data.donor_device_ids || []).length ? data.donor_device_ids.join('<br/>') : '-' },
-        { k: '15분 피크 절감', v: `${formatNum(toKw(r15), 2)} kW (${formatNum(r15Pct, 2)}%)`, cls: r15 > 0 ? 'good' : 'warn' },
-        { k: '30분 피크 절감', v: `${formatNum(toKw(r30), 2)} kW (${formatNum(r30Pct, 2)}%)`, cls: r30 > 0 ? 'good' : 'warn' },
+        { k: '15분 피크 절감', v: `${formatKw(r15, 2)} kW (${formatNum(r15Pct, 2)}%)`, cls: r15 > 0 ? 'good' : 'warn' },
+        { k: '30분 피크 절감', v: `${formatKw(r30, 2)} kW (${formatNum(r30Pct, 2)}%)`, cls: r30 > 0 ? 'good' : 'warn' },
         { k: '미가동 장비 수', v: `${(data.idle_device_ids || []).length}대` },
         { k: '제외 장비 수', v: `${(data.skipped_devices || []).length}대` },
       ];
@@ -331,7 +332,7 @@
 
         statusTextEl.innerHTML = `
           상태: <b>${esc(data.status || '-')}</b>,
-          메시지: ${esc(data.message || '-')}
+          메시지: ${esc(data.message || '-')} (화면 표시는 kW 기준)
         `;
 
         renderSummary(data);

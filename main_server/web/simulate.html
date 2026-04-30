@@ -154,6 +154,7 @@
     let isRunningSimulation = false;
     let templateRequestSeq = 0;
     let lastExcludedWarnedCount = 0;
+    const POWER_FIELDS = new Set(['CURVOLTAGE']);
 
     function setTemplateLoading(flag) {
       isLoadingTemplate = flag;
@@ -261,7 +262,30 @@
 
     function toKw(v) {
       if (v === null || v === undefined || Number.isNaN(Number(v))) return null;
-      return Number(v) / 1000;
+      return Number(v);
+    }
+
+    function isPowerField(field) {
+      return POWER_FIELDS.has(String(field || '').toUpperCase());
+    }
+
+    function toDisplayOverrideValue(field, value) {
+      if (value === null || value === undefined || Number.isNaN(Number(value))) return null;
+      return Number(value);
+    }
+
+    function toRawOverrideValue(field, value) {
+      if (value === null || value === undefined || Number.isNaN(Number(value))) return null;
+      return Number(value);
+    }
+
+    function formatOverrideHint(field, value) {
+      const displayValue = toDisplayOverrideValue(field, value);
+      if (displayValue === null) return '-';
+      if (isPowerField(field)) {
+        return `${formatNum(displayValue, 3)} kW`;
+      }
+      return formatNum(displayValue, 4);
     }
 
     function formatKw(v, digits = 3) {
@@ -358,7 +382,7 @@
       const categories = ['15분', '30분'];
       const baselineValues = [Number(bp.y15 || 0), Number(bp.y30 || 0)];
       const simValues = [Number(sp.y15 || 0), Number(sp.y30 || 0)];
-      const textTemplate = (values) => values.map((v) => `${formatKw(v, 2)} kW`);
+      const textTemplate = (values) => values.map((v) => `${formatNum(v, 2)} kW`);
 
       Plotly.purge(compareChartEl);
       compareChartEl.innerHTML = '';
@@ -520,21 +544,22 @@
 
       keys.forEach((key) => {
         const val = values?.[key];
+        const displayValue = toDisplayOverrideValue(key, val);
         const wrap = document.createElement('div');
         wrap.className = 'field';
 
         const label = document.createElement('label');
-        label.textContent = key;
+        label.textContent = isPowerField(key) ? `${key} (kW)` : key;
 
         const input = document.createElement('input');
         input.type = 'number';
         input.step = 'any';
-        input.value = val ?? '';
+        input.value = displayValue ?? '';
         input.dataset.field = key;
 
         const baselineHint = document.createElement('div');
         baselineHint.className = 'baseline-hint';
-        baselineHint.textContent = `기준값: ${val ?? '-'}`;
+        baselineHint.textContent = `기준값: ${formatOverrideHint(key, val)}`;
 
         wrap.appendChild(label);
         wrap.appendChild(input);
@@ -553,14 +578,18 @@
         if (value === '') return;
 
         const next = Number(value);
+        const nextRaw = toRawOverrideValue(field, next);
         const base = baselineValues[field];
-        if (base === null || base === undefined || Number.isNaN(Number(base))) {
-          out[field] = next;
+        const baseDisplay = toDisplayOverrideValue(field, base);
+        if (nextRaw === null) return;
+
+        if (baseDisplay === null) {
+          out[field] = nextRaw;
           return;
         }
 
-        if (Math.abs(next - Number(base)) > 1e-9) {
-          out[field] = next;
+        if (Math.abs(next - Number(baseDisplay)) > 1e-9) {
+          out[field] = nextRaw;
         }
       });
       return out;

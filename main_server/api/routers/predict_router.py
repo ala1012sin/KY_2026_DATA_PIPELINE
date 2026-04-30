@@ -23,7 +23,7 @@ def predict(req: PredictRequest):
     req_started_at = datetime.now()
     logger.info(f"[AI 예측] 수동 예측 시작 device_id={req.device_id}, rows={len(req.rows)}")
     try:
-        result = predict_manual(req.device_id, req.rows)
+        result = predict_manual(req.device_id, req.rows, power_in_kw=True)
         record_api_event(endpoint="/predict", device_id=req.device_id, status_code=200)
         elapsed_ms = int((datetime.now() - req_started_at).total_seconds() * 1000)
         logger.info(f"[AI 예측] 수동 예측 결과 응답: 200 device_id={req.device_id}, elapsed_ms={elapsed_ms}")
@@ -70,7 +70,7 @@ def predict_by_device(device_id: str, lookback_hours: int = Query(24, ge=1, le=2
         "max_data_age_hours=24(fixed)"
     )
     try:
-        result = predict_one_device(device_id, lookback_hours, 24)
+        result = predict_one_device(device_id, lookback_hours, 24, power_in_kw=True)
         record_api_event(endpoint="/predict/{device_id}", device_id=device_id, status_code=200)
         elapsed_ms = int((datetime.now() - req_started_at).total_seconds() * 1000)
         logger.info(f"[AI 예측] 자동 예측 결과 응답: 200 device_id={device_id}, elapsed_ms={elapsed_ms}")
@@ -138,7 +138,7 @@ def predict_batch(req: MultiPredictRequest):
 
     for device_id in req.device_ids:
         try:
-            result = predict_one_device(device_id, req.lookback_hours, 24)
+            result = predict_one_device(device_id, req.lookback_hours, 24, power_in_kw=True)
             record_api_event(endpoint="/predict/batch-item", device_id=device_id, status_code=200)
             results.append(result)
         except HTTPException as e:

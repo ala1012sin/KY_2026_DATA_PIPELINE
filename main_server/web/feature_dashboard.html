@@ -401,18 +401,18 @@ function renderDashboard(data) {
   }
   document.getElementById('sensorGrid').innerHTML = sensorHtml;
 
-  // ── API는 W/Wh, 화면 표시는 kW/kWh로 변환 ──
+  // ── API는 CURVOLTAGE는 kW, daily_energy_wh는 kWh 단위(레거시 키명) ──
   const instKw = current.CURVOLTAGE !== undefined && current.CURVOLTAGE !== null
-    ? Number(current.CURVOLTAGE) / 1000
+    ? Number(current.CURVOLTAGE)
     : null;
   const predInstKw15 = pred15Entry && pred15Entry.row.CURVOLTAGE !== undefined && pred15Entry.row.CURVOLTAGE !== null
-    ? Number(pred15Entry.row.CURVOLTAGE) / 1000
+    ? Number(pred15Entry.row.CURVOLTAGE)
     : null;
   const predInstKw30 = pred30Entry && pred30Entry.row.CURVOLTAGE !== undefined && pred30Entry.row.CURVOLTAGE !== null
-    ? Number(pred30Entry.row.CURVOLTAGE) / 1000
+    ? Number(pred30Entry.row.CURVOLTAGE)
     : null;
   const dailyKwh = data.daily_energy_wh !== undefined && data.daily_energy_wh !== null
-    ? Number(data.daily_energy_wh) / 1000
+    ? Number(data.daily_energy_wh)
     : null;
 
   let powerHtml = '';

@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, HTTPException, Query
 
-from service.dashboard_service import get_daily_energy_wh, get_dashboard_data
+from service.dashboard_service import get_daily_energy_kwh, get_dashboard_data
 
 router = APIRouter()
 
@@ -23,10 +23,10 @@ def dashboard(
 
 @router.get("/monitor/daily-energy/{device_id}")
 def daily_energy(device_id: str):
-    """오늘 자정부터 현재까지의 누적 전력량(Wh)을 반환한다."""
+    """오늘 자정부터 현재까지의 누적 전력량(kWh)을 반환한다."""
     try:
-        wh = get_daily_energy_wh(device_id)
-        return {"device_id": device_id, "daily_energy_wh": wh}
+        kwh = get_daily_energy_kwh(device_id)
+        return {"device_id": device_id, "daily_energy_wh": kwh}
     except HTTPException:
         raise
     except Exception as e:

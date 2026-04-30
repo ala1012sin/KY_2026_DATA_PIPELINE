@@ -227,6 +227,30 @@ def _format_kw_from_w(value_w: float) -> str:
     return f"{(float(value_w) / 1000.0):.2f}"
 
 
+def _w_to_kw(value_w: Any) -> float:
+    """W 단위 숫자를 kW float으로 변환한다."""
+    return round(float(value_w) / 1000.0, 4)
+
+
+def _is_weldex_company(company_name: Any) -> bool:
+    text = str(company_name or "").casefold()
+    return ("weldex" in text) or ("월덱스" in str(company_name or ""))
+
+
+def _cap_milp_prediction_for_weldex(p_w: float, horse_power: Any) -> float:
+    """월덱스 장비의 MILP 입력 예측값을 마력 기반 상한으로 제한한다."""
+    try:
+        hp = float(horse_power)
+    except Exception:
+        return max(0.0, float(p_w))
+    if hp <= 0:
+        return max(0.0, float(p_w))
+
+    # HP -> kW 변환(0.76) 후 20% 여유를 둔 상한
+    cap_w = hp * 0.76 * 1000.0 * 1.2
+    return max(0.0, min(float(p_w), float(cap_w)))
+
+
 def _format_pct(value: float) -> str:
     return f"{float(value):.1f}"
 
@@ -1134,6 +1158,10 @@ def _collect_prediction_records(
             continue
 
         company_info = company_map.get(device_id, {"customer_id": "UNASSIGNED", "company_name": "미지정 회사"})
+        if _is_weldex_company(company_info.get("company_name")):
+            p15 = _cap_milp_prediction_for_weldex(p15, company_info.get("horse_power"))
+            p30 = _cap_milp_prediction_for_weldex(p30, company_info.get("horse_power"))
+
         records.append(
             {
                 "device_id": device_id,
@@ -1164,7 +1192,7 @@ def _build_slim_result_payload(result_payload: Dict[str, Any]) -> Dict[str, Any]
             "minute": int(a.get("minute", 0)),
             "from_device_id": a.get("from_device_id"),
             "to_device_id": a.get("to_device_id"),
-            "power_w": float(a.get("power_w", 0.0)),
+            "power_w": _w_to_kw(a.get("power_w", 0.0)),
         }
         for a in allocation_plan
     ]
@@ -1173,11 +1201,11 @@ def _build_slim_result_payload(result_payload: Dict[str, Any]) -> Dict[str, Any]
         {
             "device_id": str(d.get("device_id")),
             "is_donor": bool(d.get("is_donor", False)),
-            "threshold": float(d.get("threshold", 0.0)),
-            "baseline_15": float(d.get("baseline_15", 0.0)),
-            "baseline_30": float(d.get("baseline_30", 0.0)),
-            "shift_out_15": float(d.get("shift_out_15", 0.0)),
-            "shift_out_30": float(d.get("shift_out_30", 0.0)),
+            "threshold": _w_to_kw(d.get("threshold", 0.0)),
+            "baseline_15": _w_to_kw(d.get("baseline_15", 0.0)),
+            "baseline_30": _w_to_kw(d.get("baseline_30", 0.0)),
+            "shift_out_15": _w_to_kw(d.get("shift_out_15", 0.0)),
+            "shift_out_30": _w_to_kw(d.get("shift_out_30", 0.0)),
             "distribution_text": d.get("distribution_text"),
         }
         for d in devices_out
@@ -1195,11 +1223,11 @@ def _build_slim_result_payload(result_payload: Dict[str, Any]) -> Dict[str, Any]
         "device_count": int(result_payload.get("device_count", 0)),
         "donor_device_ids": result_payload.get("donor_device_ids") or [],
         "idle_device_ids": result_payload.get("idle_device_ids") or [],
-        "peak_15_reduction": peak_15_before - peak_15_after,
+        "peak_15_reduction": _w_to_kw(peak_15_before - peak_15_after),
         "peak_15_reduction_pct": (
             0.0 if peak_15_before == 0.0 else ((peak_15_before - peak_15_after) / peak_15_before * 100.0)
         ),
-        "peak_30_reduction": peak_30_before - peak_30_after,
+        "peak_30_reduction": _w_to_kw(peak_30_before - peak_30_after),
         "peak_30_reduction_pct": (
             0.0 if peak_30_before == 0.0 else ((peak_30_before - peak_30_after) / peak_30_before * 100.0)
         ),

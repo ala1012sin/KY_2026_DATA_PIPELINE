@@ -23,6 +23,13 @@ def _safe_float(value: Any) -> Optional[float]:
         return None
 
 
+def _w_to_kw(value: Optional[float]) -> Optional[float]:
+    """W 단위 값을 kW 단위로 변환한다."""
+    if value is None:
+        return None
+    return round(value / 1000.0, 4)
+
+
 def get_current_sensor_values(device_id: str) -> Dict[str, Optional[float]]:
     """DB에서 지난 2시간 내 최신 센서값을 반환한다."""
     end_dt = datetime.now()
@@ -99,6 +106,11 @@ def get_daily_energy_wh(device_id: str) -> float:
     return round(energy_wh, 4)
 
 
+def get_daily_energy_kwh(device_id: str) -> float:
+    """오늘 자정부터 현재까지의 누적 전력량(kWh)을 반환한다."""
+    return round(get_daily_energy_wh(device_id) / 1000.0, 4)
+
+
 def get_history_by_time(device_id: str, lookback_hours: int) -> Dict[str, Dict[str, Optional[float]]]:
     """lookback 구간의 15분 리샘플 시계열을 {timestamp: {feature: value}}로 반환한다."""
     end_dt = datetime.now()
@@ -127,7 +139,7 @@ def get_history_by_time(device_id: str, lookback_hours: int) -> Dict[str, Dict[s
     for _, row in df15.iterrows():
         ts = pd.Timestamp(row["LOG_DT"]).isoformat()
         out[ts] = {
-            "CURVOLTAGE": _safe_float(row.get("CUR_VOLTAGE")),
+            "CURVOLTAGE": _w_to_kw(_safe_float(row.get("CUR_VOLTAGE"))),
             "PRESSURE": _safe_float(row.get("PRESSURE")),
             "TEMPERATURE": _safe_float(row.get("TEMPERATURE")),
             "HZ": _safe_float(row.get("HZ")),
@@ -153,8 +165,8 @@ def _fetch_power_predictions(device_id: str, lookback_hours: int) -> tuple[Optio
         power_result = predict_one_device(device_id, lookback_hours, 24)
         power_pred = (power_result.get("preds") or [{}])[-1]
         return (
-            max(0.0, float(power_pred.get("y_15_pred", 0.0))),
-            max(0.0, float(power_pred.get("y_30_pred", 0.0))),
+            _w_to_kw(max(0.0, float(power_pred.get("y_15_pred", 0.0)))),
+            _w_to_kw(max(0.0, float(power_pred.get("y_30_pred", 0.0)))),
         )
     except HTTPException:
         return None, None
@@ -224,16 +236,16 @@ def get_dashboard_data(device_id: str, lookback_hours: int = 24) -> Dict[str, An
     current_values = {k: v for k, v in current.items() if k != "CURVOLTAGE"}
     feature_preds = _fetch_feature_predictions(device_id, lookback_hours)
     power_y15, power_y30 = _fetch_power_predictions(device_id, lookback_hours)
-    daily_energy_wh = get_daily_energy_wh(device_id)
+    daily_energy_kwh = get_daily_energy_kwh(device_id)
     current_power_w = current.get("CURVOLTAGE")
-    instantaneous_w = round(current_power_w, 4) if current_power_w is not None else None
+    instantaneous_kw = _w_to_kw(current_power_w)
     history_by_time = get_history_by_time(device_id=device_id, lookback_hours=2)
-    _append_current_snapshot(history_by_time, now, current_values, instantaneous_w)
+    _append_current_snapshot(history_by_time, now, current_values, instantaneous_kw)
     _append_prediction_snapshots(history_by_time, now, feature_preds, power_y15, power_y30)
 
     return {
         "device_id": device_id,
         "timestamp": now.isoformat(),
-        "daily_energy_wh": daily_energy_wh,
+        "daily_energy_wh": daily_energy_kwh,
         "history_by_time": history_by_time,
     }
